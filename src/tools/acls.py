@@ -56,6 +56,19 @@ def _normalise_protocol_filter(protocols: list[str] | None) -> list[str] | None:
         raise ValueError(f"Invalid protocol(s) {invalid}. Must be a subset of {_VALID_PROTOCOLS}.")
     return upper
 
+def _endpoint_uses_port_filter(endpoint: dict[str, Any] | None) -> bool:
+    """True if a built IP endpoint carries any port filter (`PORTS` type, or a
+    `portFilter` narrowing `NETWORKS`/`IP_ADDRESSES_OR_SUBNETS`). The integration API
+    rejects a port filter with no `protocolFilter` on the rule
+    (`api.acl-rule.validation.port-filter-not-allowed-without-protocol-filter`, confirmed
+    live against Network 10.5.67, 2026-08-26) — checked here so that failure happens
+    before a network round trip, with a clear message instead of a raw 400."""
+    if endpoint is None:
+        return False
+    if endpoint.get("type") == "PORTS":
+        return True
+    return bool(endpoint.get("portFilter"))
+
 
 def _build_ip_endpoint(
     *,
@@ -253,7 +266,9 @@ async def create_acl_rule(
             only. Match traffic by literal IP address or CIDR subnet.
         source_port_filter / destination_port_filter: type='IPV4' only. Narrows a
             `*_network_ids` or `*_ip_addresses_or_subnets` filter to specific ports; do not
-            pass alongside `*_ports` (which already IS the port filter).
+            pass alongside `*_ports` (which already IS the port filter). Requires
+            `protocol_filter` — the API rejects any port filter (this one, `*_ports`, or a
+            `*_network_ids`/`*_ip_addresses_or_subnets` filter narrowed by one) with none set.
         source_mac_addresses / destination_mac_addresses: type='MAC' only. Match traffic by
             literal MAC address.
         source_mac_prefix_length / destination_mac_prefix_length: type='MAC' only. Narrows
@@ -311,6 +326,15 @@ async def create_acl_rule(
             role="destination",
         )
         normalised_protocols = _normalise_protocol_filter(protocol_filter)
+        if normalised_protocols is None and (
+            _endpoint_uses_port_filter(source_filter)
+            or _endpoint_uses_port_filter(destination_filter)
+        ):
+            raise ValueError(
+                "A port filter (source_ports/destination_ports/*_port_filter) requires "
+                "protocol_filter (e.g. ['TCP']) — the integration API rejects a port "
+                "filter with no protocol filter."
+            )
         if normalised_protocols is not None:
             payload["protocolFilter"] = normalised_protocols
 
@@ -398,7 +422,8 @@ async def update_acl_rule(
         source_network_ids / destination_network_ids: type='IPV4' only.
         source_ports / destination_ports: type='IPV4' only.
         source_ip_addresses_or_subnets / destination_ip_addresses_or_subnets: type='IPV4' only.
-        source_port_filter / destination_port_filter: type='IPV4' only.
+        source_port_filter / destination_port_filter: type='IPV4' only. Requires
+            `protocol_filter` — see `create_acl_rule`.
         source_mac_addresses / destination_mac_addresses: type='MAC' only.
         source_mac_prefix_length / destination_mac_prefix_length: type='MAC' only.
         protocol_filter: type='IPV4' only. Subset of ["TCP", "UDP"].
@@ -479,6 +504,15 @@ async def update_acl_rule(
             role="destination",
         )
         normalised_protocols = _normalise_protocol_filter(protocol_filter)
+        if normalised_protocols is None and (
+            _endpoint_uses_port_filter(source_filter)
+            or _endpoint_uses_port_filter(destination_filter)
+        ):
+            raise ValueError(
+                "A port filter (source_ports/destination_ports/*_port_filter) requires "
+                "protocol_filter (e.g. ['TCP']) — the integration API rejects a port "
+                "filter with no protocol filter."
+            )
         if normalised_protocols is not None:
             payload["protocolFilter"] = normalised_protocols
     else:

@@ -292,6 +292,23 @@ async def test_create_acl_rule_ambiguous_filter_rejected(mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_create_acl_rule_port_filter_requires_protocol_filter(mock_settings):
+    """Confirmed live against Network 10.5.67, 2026-08-26:
+    api.acl-rule.validation.port-filter-not-allowed-without-protocol-filter. Caught here
+    before a network round trip rather than surfacing as a raw 400."""
+    with pytest.raises(ValueError, match="requires protocol_filter"):
+        await create_acl_rule(
+            "default",
+            "Bad Rule",
+            "allow",
+            mock_settings,
+            destination_ip_addresses_or_subnets=["10.0.1.193"],
+            destination_port_filter=[8123],
+            confirm=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_acl_rule_mac_requires_network_id_filter(mock_settings):
     with pytest.raises(ValueError, match="network_id_filter is required"):
         await create_acl_rule(

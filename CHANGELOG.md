@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`source_network_ids`, `destination_ip_addresses_or_subnets`, `source_mac_addresses`, ...,
     matching the existing `firewall_policies.py` convention) and build the correct nested
     request body.
+  - **A real business rule found only by a live mutation, not the spec**: the integration API
+    rejects any ACL rule port filter with no `protocolFilter` set
+    (`api.acl-rule.validation.port-filter-not-allowed-without-protocol-filter`) — undocumented
+    in the OpenAPI schema, which marks both fields independently optional. `create_acl_rule`/
+    `update_acl_rule` now check this locally and raise before a network round trip, rather than
+    surfacing a raw 400.
   - Both models now use `pydantic.TypeAdapter` for parsing (`parse_acl_rule`,
     `parse_traffic_matching_list`) since a real discriminated union can't be instantiated by
     calling a class directly — `ACLRule(**data)` is gone; callers use the module-level
@@ -43,11 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- Verified against a live UDM Pro (Network 10.5.67, direct code invocation, not yet re-applied
-  as a real mutation): parsing `{"type": "PORT_NUMBER", "value": 50000}` and
-  `{"type": "PORT_NUMBER", "value": 6443}` — the exact values that failed validation in
-  production this session — now succeeds.
-- 1249 tests pass (up from 1243 in 0.2.6); the ACL/traffic-matching-list test fixtures were
+- **Fully verified against a live UDM Pro (Network 10.5.67), real mutations, not just parsing**:
+  for both `create_traffic_matching_list` and `create_acl_rule`, ran a real
+  create → get → list → delete round trip against the live controller (site
+  `88f7af54-98f8-306a-a1c7-c9349722b1f6`) using the fork's own client code directly, bypassing
+  the MCP protocol. Confirmed: POST returns `201` and the response parses cleanly through the
+  new models; the created object is retrievable by ID and appears in the list; DELETE returns
+  `200` and leaves no residue (checked with a follow-up list). The port-filter/protocol-filter
+  rule above was found exactly this way — a "should have worked" request came back a real
+  `400` from the live controller with a specific error code, which is what prompted adding the
+  local check. Every test artifact created during verification was deleted immediately after;
+  a final listing confirmed zero leftover ACL rules and zero leftover traffic matching lists
+  bearing the `DELETE-ME` marker used during testing.
+- 1250 tests pass (up from 1243 in 0.2.6); the ACL/traffic-matching-list test fixtures were
   themselves wrong in the same way the models were (`_id` instead of `id`, string port values,
   a nonexistent `IPV6_ADDRESS` item type) and are rewritten to match the real spec.
 
