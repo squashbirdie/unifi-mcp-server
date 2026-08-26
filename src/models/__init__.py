@@ -1,6 +1,6 @@
 """Data models for UniFi MCP Server."""
 
-from .acl import ACLRule
+from .acl import IPACLRule, MACACLRule, parse_acl_rule
 from .backup import (
     BackupMetadata,
     BackupOperation,
@@ -44,6 +44,7 @@ from .traffic_matching_list import (
     TrafficMatchingListCreate,
     TrafficMatchingListType,
     TrafficMatchingListUpdate,
+    parse_traffic_matching_list,
 )
 from .voucher import Voucher
 from .vpn import VPNServer, VPNTunnel
@@ -55,7 +56,9 @@ __all__ = [
     "Device",
     "Client",
     "Network",
-    "ACLRule",
+    "IPACLRule",
+    "MACACLRule",
+    "parse_acl_rule",
     "Voucher",
     "FirewallZone",
     "FirewallPolicy",
@@ -83,6 +86,7 @@ __all__ = [
     "TrafficMatchingListCreate",
     "TrafficMatchingListUpdate",
     "TrafficMatchingListType",
+    "parse_traffic_matching_list",
     "VPNTunnel",
     "VPNServer",
     "RADIUSProfile",

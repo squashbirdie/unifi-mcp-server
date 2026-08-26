@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-08-26 (squashbirdie fork)
+
+### Fixed
+
+- **`TrafficMatchingList`/`ACLRule` were still wrong after 0.2.6** — that release's fixes were
+  necessary but not sufficient. Rebuilt both against the actual OpenAPI spec
+  (`developer.ui.com/network/v10.4.57/openapi.json`, fetched live) rather than guessing from
+  single observed responses:
+  - **`TrafficMatchingList` items**: 0.2.6 assumed a flat `{"type": str, "value": str}` shape
+    for every item. The real shape is a *per-list-type* discriminated union: `PORTS` items are
+    `{"type": "PORT_NUMBER", "value": <int>}` (an integer, not a string — the exact bug that
+    broke `list_traffic_matching_lists` in production, `items.0.value` "Input should be a
+    valid string" for values like `50000`) or `{"type": "PORT_NUMBER_RANGE", "start": <int>,
+    "stop": <int>}`; `IPV4_ADDRESSES`/`IPV6_ADDRESSES` items are `IP_ADDRESS`/`SUBNET` (and,
+    IPv4 only, `IP_ADDRESS_RANGE`). None of the range variants existed in the old model at all.
+    `create_traffic_matching_list`/`update_traffic_matching_list` sent the same wrong flat
+    shape on write. New tool signatures accept plain ints/strings/range-dicts and build the
+    correct discriminated payload (see `_normalise_traffic_matching_item`).
+  - **`ACLRule`**: was an entirely guessed flat shape (`source_type`, `dst_port`,
+    `source_network`, ...) that does not exist in the real API at all — it only ever "worked"
+    because every field was `Optional` and the one production controller checked against had
+    zero ACL rules to validate against. The real shape is a discriminated union on `type`
+    (`IPV4`/`MAC`), each carrying `sourceFilter`/`destinationFilter` objects that are
+    themselves discriminated unions (`NETWORKS`/`PORTS`/`IP_ADDRESSES_OR_SUBNETS` for IPv4,
+    `MAC_ADDRESSES` for MAC). **This also means `create_acl_rule`'s previous claim that "the
+    integration API accepts only `{name, action, type, enabled}`" was wrong** — it was a
+    symptom of the wrong field names being tried, not a real API limitation.
+    `create_acl_rule`/`update_acl_rule` now accept flat, auto-detected filter parameters
+    (`source_network_ids`, `destination_ip_addresses_or_subnets`, `source_mac_addresses`, ...,
+    matching the existing `firewall_policies.py` convention) and build the correct nested
+    request body.
+  - Both models now use `pydantic.TypeAdapter` for parsing (`parse_acl_rule`,
+    `parse_traffic_matching_list`) since a real discriminated union can't be instantiated by
+    calling a class directly — `ACLRule(**data)` is gone; callers use the module-level
+    function instead.
+
+### Notes
+
+- Verified against a live UDM Pro (Network 10.5.67, direct code invocation, not yet re-applied
+  as a real mutation): parsing `{"type": "PORT_NUMBER", "value": 50000}` and
+  `{"type": "PORT_NUMBER", "value": 6443}` — the exact values that failed validation in
+  production this session — now succeeds.
+- 1249 tests pass (up from 1243 in 0.2.6); the ACL/traffic-matching-list test fixtures were
+  themselves wrong in the same way the models were (`_id` instead of `id`, string port values,
+  a nonexistent `IPV6_ADDRESS` item type) and are rewritten to match the real spec.
+
 ## [0.2.6] - 2026-08-26 (squashbirdie fork)
 
 ### Fixed

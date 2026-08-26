@@ -1,4 +1,10 @@
-"""Tests for ACL tools."""
+"""Tests for ACL tools.
+
+Fixtures use the real integration API shape (developer.ui.com/network v10.4.57, verified
+2026-08-26): camelCase `sourceFilter`/`destinationFilter` discriminated objects, `metadata`,
+`index`, `type` (IPV4/MAC) - not the flat guessed shape (`source_type`, `dst_port`, ...)
+this test file used before that field never existed in the real API.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,31 +46,37 @@ def _prepare_client(mock_client: AsyncMock) -> AsyncMock:
     return mock_client
 
 
+def _ip_rule(**overrides):
+    rule = {
+        "id": "acl-1",
+        "type": "IPV4",
+        "index": 10,
+        "name": "Block IoT to LAN",
+        "enabled": True,
+        "action": "BLOCK",
+        "metadata": {"origin": "USER_DEFINED"},
+        "sourceFilter": {"type": "NETWORKS", "networkIds": ["net-iot"]},
+        "destinationFilter": {"type": "NETWORKS", "networkIds": ["net-lan"]},
+    }
+    rule.update(overrides)
+    return rule
+
+
 @pytest.mark.asyncio
 async def test_list_acl_rules_success(mock_settings):
     mock_response = {
         "data": [
+            _ip_rule(),
             {
-                "_id": "acl-1",
-                "site_id": "default",
-                "name": "Block IoT to LAN",
-                "enabled": True,
-                "action": "deny",
-                "source_type": "network",
-                "source_id": "net-iot",
-                "destination_type": "network",
-                "destination_id": "net-lan",
-                "priority": 10,
-            },
-            {
-                "_id": "acl-2",
-                "site_id": "default",
+                "id": "acl-2",
+                "type": "IPV4",
+                "index": 20,
                 "name": "Allow DNS",
                 "enabled": True,
-                "action": "allow",
-                "protocol": "udp",
-                "dst_port": 53,
-                "priority": 20,
+                "action": "ALLOW",
+                "metadata": {"origin": "USER_DEFINED"},
+                "destinationFilter": {"type": "PORTS", "portFilter": [53]},
+                "protocolFilter": ["UDP"],
             },
         ]
     }
@@ -83,25 +95,16 @@ async def test_list_acl_rules_success(mock_settings):
         assert len(result) == 2
         assert result[0]["id"] == "acl-1"
         assert result[0]["name"] == "Block IoT to LAN"
-        assert result[0]["action"] == "deny"
+        assert result[0]["action"] == "BLOCK"
+        assert result[0]["source_filter"]["network_ids"] == ["net-iot"]
         assert result[1]["id"] == "acl-2"
+        assert result[1]["protocol_filter"] == ["UDP"]
         mock_client.get.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_list_acl_rules_with_filter(mock_settings):
-    mock_response = {
-        "data": [
-            {
-                "_id": "acl-1",
-                "site_id": "default",
-                "name": "Block Rule",
-                "enabled": True,
-                "action": "deny",
-                "priority": 10,
-            }
-        ]
-    }
+    mock_response = {"data": [_ip_rule(action="BLOCK")]}
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -111,29 +114,18 @@ async def test_list_acl_rules_with_filter(mock_settings):
         mock_client.__aexit__ = AsyncMock()
         mock_client_class.return_value = mock_client
 
-        result = await list_acl_rules("default", mock_settings, filter_expr="action==deny")
+        result = await list_acl_rules("default", mock_settings, filter_expr="action==BLOCK")
 
         assert len(result) == 1
-        assert result[0]["action"] == "deny"
+        assert result[0]["action"] == "BLOCK"
         mock_client.get.assert_called_once()
         call_args = mock_client.get.call_args
-        assert call_args[1]["params"]["filter"] == "action==deny"
+        assert call_args[1]["params"]["filter"] == "action==BLOCK"
 
 
 @pytest.mark.asyncio
 async def test_list_acl_rules_pagination(mock_settings):
-    mock_response = {
-        "data": [
-            {
-                "_id": "acl-5",
-                "site_id": "default",
-                "name": "Rule 5",
-                "enabled": True,
-                "action": "allow",
-                "priority": 50,
-            }
-        ]
-    }
+    mock_response = {"data": [_ip_rule(id="acl-5", index=50, name="Rule 5")]}
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -172,22 +164,15 @@ async def test_list_acl_rules_empty(mock_settings):
 @pytest.mark.asyncio
 async def test_get_acl_rule_success(mock_settings):
     mock_response = {
-        "data": {
-            "_id": "acl-1",
-            "site_id": "default",
-            "name": "Block IoT",
-            "enabled": True,
-            "action": "deny",
-            "source_type": "network",
-            "source_id": "net-iot",
-            "destination_type": "network",
-            "destination_id": "net-lan",
-            "protocol": "all",
-            "priority": 10,
-            "description": "Isolate IoT devices",
-            "byte_count": 1024000,
-            "packet_count": 500,
-        }
+        "data": _ip_rule(
+            name="Block IoT",
+            description="Isolate IoT devices",
+            destinationFilter={
+                "type": "IP_ADDRESSES_OR_SUBNETS",
+                "ipAddressesOrSubnets": ["10.0.1.193"],
+                "portFilter": [8123],
+            },
+        )
     }
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
@@ -204,20 +189,14 @@ async def test_get_acl_rule_success(mock_settings):
         assert result["id"] == "acl-1"
         assert result["name"] == "Block IoT"
         assert result["description"] == "Isolate IoT devices"
-        assert result["byte_count"] == 1024000
+        assert result["destination_filter"]["ip_addresses_or_subnets"] == ["10.0.1.193"]
+        assert result["destination_filter"]["port_filter"] == [8123]
         mock_client.get.assert_called_once_with("/integration/v1/sites/default/acl-rules/acl-1")
 
 
 @pytest.mark.asyncio
 async def test_get_acl_rule_direct_response(mock_settings):
-    mock_response = {
-        "_id": "acl-1",
-        "site_id": "default",
-        "name": "Direct Rule",
-        "enabled": True,
-        "action": "allow",
-        "priority": 50,
-    }
+    mock_response = _ip_rule(name="Direct Rule", action="ALLOW")
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -235,16 +214,7 @@ async def test_get_acl_rule_direct_response(mock_settings):
 
 @pytest.mark.asyncio
 async def test_create_acl_rule_success(mock_settings):
-    mock_response = {
-        "data": {
-            "_id": "acl-new",
-            "site_id": "default",
-            "name": "New ACL Rule",
-            "enabled": True,
-            "action": "allow",
-            "priority": 100,
-        }
-    }
+    mock_response = {"data": _ip_rule(id="acl-new", name="New ACL Rule", action="ALLOW")}
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         with patch("src.tools.acls.audit_action", new_callable=AsyncMock) as mock_audit:
@@ -271,6 +241,70 @@ async def test_create_acl_rule_success(mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_create_acl_rule_with_network_filter(mock_settings):
+    """Real source/destination filters, the whole point of the fix — these are NOT
+    dropped, unlike the field names this test previously tried (`source_network`, ...)."""
+    mock_response = {"data": _ip_rule(id="acl-net", name="Infra to HomeAssistant")}
+
+    with patch("src.tools.acls.UniFiClient") as mock_client_class:
+        with patch("src.tools.acls.audit_action", new_callable=AsyncMock):
+            mock_client = AsyncMock()
+            mock_client.is_authenticated = True
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            await create_acl_rule(
+                "default",
+                "Infra to HomeAssistant",
+                "allow",
+                mock_settings,
+                source_network_ids=["net-infra"],
+                destination_ip_addresses_or_subnets=["10.0.1.193"],
+                destination_port_filter=[8123],
+                protocol_filter=["tcp"],
+                confirm=True,
+            )
+
+            payload = mock_client.post.call_args[1]["json_data"]
+            assert payload["sourceFilter"] == {"type": "NETWORKS", "networkIds": ["net-infra"], "portFilter": None}
+            assert payload["destinationFilter"] == {
+                "type": "IP_ADDRESSES_OR_SUBNETS",
+                "ipAddressesOrSubnets": ["10.0.1.193"],
+                "portFilter": [8123],
+            }
+            assert payload["protocolFilter"] == ["TCP"]
+
+
+@pytest.mark.asyncio
+async def test_create_acl_rule_ambiguous_filter_rejected(mock_settings):
+    with pytest.raises(ValueError, match="ambiguous"):
+        await create_acl_rule(
+            "default",
+            "Bad Rule",
+            "allow",
+            mock_settings,
+            source_network_ids=["net-1"],
+            source_ports=[443],
+            confirm=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_acl_rule_mac_requires_network_id_filter(mock_settings):
+    with pytest.raises(ValueError, match="network_id_filter is required"):
+        await create_acl_rule(
+            "default",
+            "MAC Rule",
+            "allow",
+            mock_settings,
+            type="MAC",
+            confirm=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_acl_rule_dry_run(mock_settings):
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         mock_client = _prepare_client(AsyncMock())
@@ -279,19 +313,12 @@ async def test_create_acl_rule_dry_run(mock_settings):
         mock_client.__aexit__ = AsyncMock()
         mock_client_class.return_value = mock_client
 
-        # Legacy source/destination/port kwargs are accepted but silently
-        # dropped from the payload (the integration API rejects them).
         result = await create_acl_rule(
             "default",
             "Test Rule",
             "BLOCK",
             mock_settings,
-            source_type="network",
-            source_network="10.0.0.0/24",
-            destination_type="ip",
-            destination_network="192.168.1.0/24",
-            protocol="tcp",
-            dst_port=443,
+            destination_ip_addresses_or_subnets=["192.168.1.0/24"],
             confirm=True,
             dry_run=True,
         )
@@ -301,8 +328,11 @@ async def test_create_acl_rule_dry_run(mock_settings):
         assert result["payload"]["action"] == "BLOCK"
         assert result["payload"]["type"] == "IPV4"
         assert result["payload"]["enabled"] is True
-        assert "sourceType" not in result["payload"]
-        assert "dstPort" not in result["payload"]
+        assert result["payload"]["destinationFilter"] == {
+            "type": "IP_ADDRESSES_OR_SUBNETS",
+            "ipAddressesOrSubnets": ["192.168.1.0/24"],
+            "portFilter": None,
+        }
         mock_client.post.assert_not_called()
 
 
@@ -320,71 +350,8 @@ async def test_create_acl_rule_no_confirm(mock_settings):
 
 
 @pytest.mark.asyncio
-async def test_create_acl_rule_legacy_params_ignored(mock_settings):
-    """Legacy source/destination/port filters are accepted for backwards
-    compatibility but dropped from the payload — the UniFi integration API
-    rejects them as unknown properties."""
-    mock_response = {
-        "data": {
-            "_id": "acl-full",
-            "name": "Full Options Rule",
-            "enabled": False,
-            "action": "BLOCK",
-            "type": "IPV4",
-        }
-    }
-
-    with patch("src.tools.acls.UniFiClient") as mock_client_class:
-        with patch("src.tools.acls.audit_action", new_callable=AsyncMock):
-            mock_client = _prepare_client(AsyncMock())
-            mock_client.is_authenticated = True
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client_class.return_value = mock_client
-
-            result = await create_acl_rule(
-                "default",
-                "Full Options Rule",
-                "block",
-                mock_settings,
-                enabled=False,
-                source_type="network",
-                source_id="net-1",
-                source_network="10.0.0.0/8",
-                destination_type="network",
-                destination_id="net-2",
-                destination_network="192.168.0.0/16",
-                protocol="tcp",
-                src_port=1024,
-                dst_port=443,
-                priority=5,
-                description="Full test rule",
-                confirm=True,
-            )
-
-            assert result["name"] == "Full Options Rule"
-            call_args = mock_client.post.call_args
-            payload = call_args[1]["json_data"]
-            # Payload contains only the 4 fields the integration API accepts.
-            assert set(payload.keys()) == {"name", "enabled", "action", "type"}
-            assert payload["action"] == "BLOCK"
-            assert payload["type"] == "IPV4"
-            assert payload["enabled"] is False
-
-
-@pytest.mark.asyncio
 async def test_update_acl_rule_success(mock_settings):
-    mock_response = {
-        "data": {
-            "_id": "acl-1",
-            "site_id": "default",
-            "name": "Updated Rule",
-            "enabled": False,
-            "action": "deny",
-            "priority": 100,
-        }
-    }
+    mock_response = {"data": _ip_rule(name="Updated Rule", enabled=False, action="BLOCK")}
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         with patch("src.tools.acls.audit_action", new_callable=AsyncMock):
@@ -410,6 +377,18 @@ async def test_update_acl_rule_success(mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_update_acl_rule_with_filter_requires_type(mock_settings):
+    with pytest.raises(ValueError, match="type must be given"):
+        await update_acl_rule(
+            "default",
+            "acl-1",
+            mock_settings,
+            destination_ip_addresses_or_subnets=["10.0.1.193"],
+            confirm=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_update_acl_rule_dry_run(mock_settings):
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         mock_client = _prepare_client(AsyncMock())
@@ -424,7 +403,6 @@ async def test_update_acl_rule_dry_run(mock_settings):
             mock_settings,
             name="Preview Name",
             action="allow",
-            priority=50,  # legacy kwarg — ignored
             confirm=True,
             dry_run=True,
         )
@@ -432,7 +410,6 @@ async def test_update_acl_rule_dry_run(mock_settings):
         assert result["dry_run"] is True
         assert result["payload"]["name"] == "Preview Name"
         assert result["payload"]["action"] == "ALLOW"
-        assert "priority" not in result["payload"]
         mock_client.put.assert_not_called()
 
 
@@ -451,15 +428,7 @@ async def test_update_acl_rule_no_confirm(mock_settings):
 
 @pytest.mark.asyncio
 async def test_update_acl_rule_partial_fields(mock_settings):
-    mock_response = {
-        "data": {
-            "_id": "acl-1",
-            "name": "Existing Name",
-            "enabled": False,
-            "action": "BLOCK",
-            "type": "IPV4",
-        }
-    }
+    mock_response = {"data": _ip_rule(name="Existing Name", enabled=False, action="BLOCK")}
 
     with patch("src.tools.acls.UniFiClient") as mock_client_class:
         with patch("src.tools.acls.audit_action", new_callable=AsyncMock):

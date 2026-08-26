@@ -1,7 +1,16 @@
-"""Tests for Traffic Matching Lists tools."""
+"""Tests for Traffic Matching Lists tools.
+
+Fixtures use the real integration API shape (developer.ui.com/network v10.4.57, verified
+2026-08-26): `id` (not `_id`), PORTS items are `{"type": "PORT_NUMBER", "value": <int>}`
+(not `{"type": "PORT", "value": <str>}`), and IPv4/IPv6 items both use `IP_ADDRESS`/
+`SUBNET` (not a nonexistent `IPV6_ADDRESS` type) - the previous fixtures used none of these
+correctly, which is exactly why `list_traffic_matching_lists` failed validation on a live
+controller despite this test file passing.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pydantic
 import pytest
 
 import src.tools.traffic_matching_lists as tml_module
@@ -44,9 +53,9 @@ async def test_list_traffic_matching_lists_success(mock_settings):
                 "type": "PORTS",
                 "name": "Web Ports",
                 "items": [
-                    {"type": "PORT", "value": "80"},
-                    {"type": "PORT", "value": "443"},
-                    {"type": "PORT", "value": "8080"},
+                    {"type": "PORT_NUMBER", "value": 80},
+                    {"type": "PORT_NUMBER", "value": 443},
+                    {"type": "PORT_NUMBER_RANGE", "start": 8000, "stop": 8100},
                 ],
                 "site_id": "default",
             },
@@ -56,7 +65,7 @@ async def test_list_traffic_matching_lists_success(mock_settings):
                 "name": "Blocked IPs",
                 "items": [
                     {"type": "IP_ADDRESS", "value": "10.0.0.1"},
-                    {"type": "IP_ADDRESS", "value": "10.0.0.2"},
+                    {"type": "SUBNET", "value": "10.0.0.0/24"},
                 ],
                 "site_id": "default",
             },
@@ -78,6 +87,8 @@ async def test_list_traffic_matching_lists_success(mock_settings):
         assert result[0]["id"] == "tml-1"
         assert result[0]["type"] == "PORTS"
         assert result[0]["name"] == "Web Ports"
+        assert result[0]["items"][0]["value"] == 80
+        assert result[0]["items"][2]["start"] == 8000
         assert result[1]["id"] == "tml-2"
         assert result[1]["type"] == "IPV4_ADDRESSES"
 
@@ -90,9 +101,9 @@ async def test_list_traffic_matching_lists_pagination(mock_settings):
                 "id": f"tml-{i}",
                 "type": "PORTS",
                 "name": f"List {i}",
-                "items": [{"type": "PORT", "value": "80"}],
+                "items": [{"type": "PORT_NUMBER", "value": 80}],
             }
-            for i in range(10)
+            for i in range(1, 11)
         ]
     }
 
@@ -105,11 +116,11 @@ async def test_list_traffic_matching_lists_pagination(mock_settings):
         mock_client.__aexit__ = AsyncMock()
         mock_client_class.return_value = mock_client
 
-        result = await list_traffic_matching_lists("default", mock_settings, limit=5, offset=2)
+        result = await list_traffic_matching_lists("default", mock_settings, limit=5, offset=4)
 
         assert len(result) == 5
-        assert result[0]["id"] == "tml-2"
-        assert result[4]["id"] == "tml-6"
+        assert result[0]["id"] == "tml-5"
+        assert result[4]["id"] == "tml-9"
 
 
 @pytest.mark.asyncio
@@ -138,10 +149,10 @@ async def test_get_traffic_matching_list_success(mock_settings):
             "type": "PORTS",
             "name": "Web Ports",
             "items": [
-                {"type": "PORT", "value": "80"},
-                {"type": "PORT", "value": "443"},
-                {"type": "PORT", "value": "8080"},
-                {"type": "PORT", "value": "8443"},
+                {"type": "PORT_NUMBER", "value": 80},
+                {"type": "PORT_NUMBER", "value": 443},
+                {"type": "PORT_NUMBER", "value": 8080},
+                {"type": "PORT_NUMBER", "value": 8443},
             ],
             "site_id": "default",
         }
@@ -170,8 +181,8 @@ async def test_get_traffic_matching_list_direct_response(mock_settings):
         "type": "IPV6_ADDRESSES",
         "name": "IPv6 List",
         "items": [
-            {"type": "IPV6_ADDRESS", "value": "2001:db8::1"},
-            {"type": "IPV6_ADDRESS", "value": "2001:db8::2"},
+            {"type": "IP_ADDRESS", "value": "2001:db8::1"},
+            {"type": "SUBNET", "value": "2001:db8::/32"},
         ],
     }
 
@@ -208,10 +219,14 @@ async def test_get_traffic_matching_list_not_found(mock_settings):
 async def test_create_traffic_matching_list_success(mock_settings):
     mock_response = {
         "data": {
-            "_id": "tml-new",
+            "id": "tml-new",
             "type": "PORTS",
             "name": "New Port List",
-            "items": ["22", "80", "443"],
+            "items": [
+                {"type": "PORT_NUMBER", "value": 22},
+                {"type": "PORT_NUMBER", "value": 80},
+                {"type": "PORT_NUMBER", "value": 443},
+            ],
             "site_id": "default",
         }
     }
@@ -230,14 +245,98 @@ async def test_create_traffic_matching_list_success(mock_settings):
                 "default",
                 "PORTS",
                 "New Port List",
-                ["22", "80", "443"],
+                [22, 80, 443],
                 mock_settings,
                 confirm=True,
             )
 
-            assert result["_id"] == "tml-new"
+            assert result["id"] == "tml-new"
             assert result["name"] == "New Port List"
             mock_client.post.assert_called_once()
+            payload = mock_client.post.call_args[1]["json_data"]
+            assert payload["items"] == [
+                {"type": "PORT_NUMBER", "value": 22},
+                {"type": "PORT_NUMBER", "value": 80},
+                {"type": "PORT_NUMBER", "value": 443},
+            ]
+
+
+@pytest.mark.asyncio
+async def test_create_traffic_matching_list_port_range(mock_settings):
+    """Range items ({"start", "stop"}) are the reason the old flat-string item model
+    couldn't have worked - there is no single "value" for a range at all."""
+    mock_response = {
+        "data": {
+            "id": "tml-range",
+            "type": "PORTS",
+            "name": "Ephemeral Range",
+            "items": [{"type": "PORT_NUMBER_RANGE", "start": 32768, "stop": 60999}],
+        }
+    }
+
+    with patch("src.tools.traffic_matching_lists.UniFiClient") as mock_client_class:
+        with patch("src.tools.traffic_matching_lists.log_audit"):
+            mock_client = AsyncMock()
+            mock_client.authenticate = AsyncMock()
+            mock_client.resolve_site_id = AsyncMock(return_value="default")
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            result = await create_traffic_matching_list(
+                "default",
+                "PORTS",
+                "Ephemeral Range",
+                [{"start": 32768, "stop": 60999}],
+                mock_settings,
+                confirm=True,
+            )
+
+            assert result["items"][0]["start"] == 32768
+            payload = mock_client.post.call_args[1]["json_data"]
+            assert payload["items"] == [{"type": "PORT_NUMBER_RANGE", "start": 32768, "stop": 60999}]
+
+
+@pytest.mark.asyncio
+async def test_create_traffic_matching_list_subnet_autodetect(mock_settings):
+    """A '/' in a string item auto-selects SUBNET over IP_ADDRESS."""
+    mock_response = {
+        "data": {
+            "id": "tml-subnet",
+            "type": "IPV4_ADDRESSES",
+            "name": "Mixed",
+            "items": [
+                {"type": "IP_ADDRESS", "value": "10.0.1.193"},
+                {"type": "SUBNET", "value": "10.0.10.0/24"},
+            ],
+        }
+    }
+
+    with patch("src.tools.traffic_matching_lists.UniFiClient") as mock_client_class:
+        with patch("src.tools.traffic_matching_lists.log_audit"):
+            mock_client = AsyncMock()
+            mock_client.authenticate = AsyncMock()
+            mock_client.resolve_site_id = AsyncMock(return_value="default")
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            await create_traffic_matching_list(
+                "default",
+                "IPV4_ADDRESSES",
+                "Mixed",
+                ["10.0.1.193", "10.0.10.0/24"],
+                mock_settings,
+                confirm=True,
+            )
+
+            payload = mock_client.post.call_args[1]["json_data"]
+            assert payload["items"] == [
+                {"type": "IP_ADDRESS", "value": "10.0.1.193"},
+                {"type": "SUBNET", "value": "10.0.10.0/24"},
+            ]
 
 
 @pytest.mark.asyncio
@@ -256,6 +355,10 @@ async def test_create_traffic_matching_list_dry_run(mock_settings):
         assert result["dry_run"] is True
         assert result["would_create"]["name"] == "Test IPs"
         assert result["would_create"]["type"] == "IPV4_ADDRESSES"
+        assert result["would_create"]["items"] == [
+            {"type": "IP_ADDRESS", "value": "192.168.2.1"},
+            {"type": "IP_ADDRESS", "value": "192.168.1.2"},
+        ]
 
 
 @pytest.mark.asyncio
@@ -265,7 +368,7 @@ async def test_create_traffic_matching_list_no_confirm(mock_settings):
             "default",
             "PORTS",
             "Test",
-            ["80"],
+            [80],
             mock_settings,
             confirm=False,
         )
@@ -279,7 +382,7 @@ async def test_create_traffic_matching_list_invalid_type(mock_settings):
             "default",
             "INVALID_TYPE",
             "Test",
-            ["80"],
+            [80],
             mock_settings,
             confirm=True,
         )
@@ -301,21 +404,40 @@ async def test_create_traffic_matching_list_empty_items(mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_create_traffic_matching_list_out_of_range_port(mock_settings):
+    """The real per-item schema is enforced, not just a flat string check."""
+    with patch("src.tools.traffic_matching_lists.log_audit"):
+        with pytest.raises(pydantic.ValidationError):
+            await create_traffic_matching_list(
+                "default",
+                "PORTS",
+                "Bad Port",
+                [70000],
+                mock_settings,
+                confirm=True,
+                dry_run=True,
+            )
+
+
+@pytest.mark.asyncio
 async def test_update_traffic_matching_list_success(mock_settings):
     mock_get_response = {
         "data": {
-            "_id": "tml-1",
+            "id": "tml-1",
             "type": "PORTS",
             "name": "Old Name",
-            "items": ["80"],
+            "items": [{"type": "PORT_NUMBER", "value": 80}],
         }
     }
     mock_put_response = {
         "data": {
-            "_id": "tml-1",
+            "id": "tml-1",
             "type": "PORTS",
             "name": "New Name",
-            "items": ["80", "443"],
+            "items": [
+                {"type": "PORT_NUMBER", "value": 80},
+                {"type": "PORT_NUMBER", "value": 443},
+            ],
         }
     }
 
@@ -323,6 +445,7 @@ async def test_update_traffic_matching_list_success(mock_settings):
         with patch("src.tools.traffic_matching_lists.log_audit"):
             mock_client = AsyncMock()
             mock_client.authenticate = AsyncMock()
+            mock_client.resolve_site_id = AsyncMock(return_value="default")
             mock_client.get = AsyncMock(return_value=mock_get_response)
             mock_client.put = AsyncMock(return_value=mock_put_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -334,12 +457,17 @@ async def test_update_traffic_matching_list_success(mock_settings):
                 "tml-1",
                 mock_settings,
                 name="New Name",
-                items=["80", "443"],
+                items=[80, 443],
                 confirm=True,
             )
 
             assert result["name"] == "New Name"
             mock_client.put.assert_called_once()
+            payload = mock_client.put.call_args[1]["json_data"]
+            assert payload["items"] == [
+                {"type": "PORT_NUMBER", "value": 80},
+                {"type": "PORT_NUMBER", "value": 443},
+            ]
 
 
 @pytest.mark.asyncio
@@ -422,10 +550,10 @@ async def test_update_traffic_matching_list_not_found(mock_settings):
 async def test_delete_traffic_matching_list_success(mock_settings):
     mock_get_response = {
         "data": {
-            "_id": "tml-1",
+            "id": "tml-1",
             "type": "PORTS",
             "name": "To Delete",
-            "items": ["80"],
+            "items": [{"type": "PORT_NUMBER", "value": 80}],
         }
     }
     mock_delete_response = {}

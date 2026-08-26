@@ -4,7 +4,11 @@ from typing import Any
 
 from ..api import UniFiClient
 from ..config import Settings
-from ..models.traffic_matching_list import TrafficMatchingList, TrafficMatchingListCreate
+from ..models.traffic_matching_list import (
+    TrafficMatchingListCreate,
+    TrafficMatchingListUpdate,
+    parse_traffic_matching_list,
+)
 from ..utils import (
     ResourceNotFoundError,
     ValidationError,
@@ -16,19 +20,58 @@ from ..utils import (
     validate_site_id,
 )
 
+_VALID_LIST_TYPES = ("PORTS", "IPV4_ADDRESSES", "IPV6_ADDRESSES")
+
 
 def _ensure_cloud_api(settings: Settings) -> None:
     """No-op retained for call-site compatibility.
 
-    Traffic matching lists were long believed cloud-only; that stopped being
-    true once the Integration API shipped locally (GA on Network App >= 9.3
-    — see Settings.get_integration_path's LOCAL branch, which already
-    targets /proxy/network/integration/v1/...). Verified live against
-    Network 10.5.67: GET .../traffic-matching-lists returns 200 with real
-    data. Kept as a function (rather than deleting every call site) in case
-    a future controller version reintroduces a real read/write split here.
+    Traffic matching lists were long believed cloud-only; that stopped being true once the
+    Integration API shipped locally (GA on Network App >= 9.3). Verified live against
+    Network 10.5.67: GET .../traffic-matching-lists returns 200.
     """
     return
+
+
+def _normalise_traffic_matching_item(list_type: str, item: Any) -> dict[str, Any]:
+    """Convert a simple item (int port, str IP/CIDR, or a range dict) into the API's
+    discriminated item shape for the given list `type`.
+
+    Accepts:
+
+    * PORTS: an `int` port number, or `{"start": int, "stop": int}` for a range.
+    * IPV4_ADDRESSES / IPV6_ADDRESSES: a `str` address (CIDR notation, containing '/', is
+      treated as a subnet; anything else as a single address), or — IPv4 only —
+      `{"start": str, "stop": str}` for an address range. IPv6 has no documented range
+      variant.
+
+    Already API-shaped dicts (`{"type": ..., "value"/"start"/"stop": ...}`) pass through
+    unchanged, for callers who want to be fully explicit.
+    """
+    if isinstance(item, dict) and "type" in item:
+        return item
+
+    if list_type == "PORTS":
+        if isinstance(item, dict):
+            if "start" not in item or "stop" not in item:
+                raise ValidationError(f"PORTS range item must have 'start' and 'stop': got {item!r}")
+            return {"type": "PORT_NUMBER_RANGE", "start": item["start"], "stop": item["stop"]}
+        return {"type": "PORT_NUMBER", "value": item}
+
+    # IPV4_ADDRESSES / IPV6_ADDRESSES
+    if isinstance(item, dict):
+        if list_type != "IPV4_ADDRESSES":
+            raise ValidationError(
+                f"Address ranges are only documented for IPV4_ADDRESSES, not {list_type}."
+            )
+        if "start" not in item or "stop" not in item:
+            raise ValidationError(
+                f"{list_type} range item must have 'start' and 'stop': got {item!r}"
+            )
+        return {"type": "IP_ADDRESS_RANGE", "start": item["start"], "stop": item["stop"]}
+    if "/" in item:
+        return {"type": "SUBNET", "value": item}
+    return {"type": "IP_ADDRESS", "value": item}
 
 
 async def list_traffic_matching_lists(
@@ -71,7 +114,7 @@ async def list_traffic_matching_lists(
                 f"Retrieved {len(paginated)} traffic matching lists for site '{site_id}'"
             )
         )
-        return [TrafficMatchingList(**lst).model_dump() for lst in paginated]
+        return [parse_traffic_matching_list(lst).model_dump() for lst in paginated]
 
 
 async def get_traffic_matching_list(
@@ -114,14 +157,14 @@ async def get_traffic_matching_list(
             raise ResourceNotFoundError("traffic_matching_list", list_id)
 
         logger.info(sanitize_log_message(f"Retrieved traffic matching list {list_id}"))
-        return TrafficMatchingList(**list_data).model_dump()
+        return parse_traffic_matching_list(list_data).model_dump()
 
 
 async def create_traffic_matching_list(
     site_id: str,
     list_type: str,
     name: str,
-    items: list[str],
+    items: list[int | str | dict[str, Any]],
     settings: Settings,
     confirm: bool | str = False,
     dry_run: bool | str = False,
@@ -132,7 +175,10 @@ async def create_traffic_matching_list(
         site_id: Site identifier
         list_type: List type (PORTS, IPV4_ADDRESSES, IPV6_ADDRESSES)
         name: List name
-        items: List items (ports, IPs, etc.)
+        items: List items. For PORTS: an int port number, or a
+            `{"start": int, "stop": int}` range. For IPV4_ADDRESSES/IPV6_ADDRESSES: a str
+            address or CIDR subnet, or — IPv4 only — a `{"start": str, "stop": str}`
+            address range.
         settings: Application settings
         confirm: Confirmation flag (must be True to execute)
         dry_run: If True, validate but don't create
@@ -149,17 +195,17 @@ async def create_traffic_matching_list(
     logger = get_logger(__name__, settings.log_level)
     _ensure_cloud_api(settings)
 
-    # Validate list type
-    valid_types = ["PORTS", "IPV4_ADDRESSES", "IPV6_ADDRESSES"]
-    if list_type not in valid_types:
-        raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {valid_types}")
+    if list_type not in _VALID_LIST_TYPES:
+        raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}")
 
-    # Validate items not empty
-    if not items or len(items) == 0:
+    if not items:
         raise ValidationError("Items list cannot be empty")
 
-    # Build list data
-    create_data = TrafficMatchingListCreate(type=list_type, name=name, items=items)
+    normalised_items = [_normalise_traffic_matching_item(list_type, item) for item in items]
+
+    # Raises pydantic.ValidationError with the real per-item schema if a caller passes,
+    # e.g., a string port or an out-of-range value.
+    create_data = TrafficMatchingListCreate(type=list_type, name=name, items=normalised_items)
 
     parameters = {
         "site_id": site_id,
@@ -209,7 +255,7 @@ async def create_traffic_matching_list(
                 site_id=site_id,
             )
 
-            return created_list
+            return parse_traffic_matching_list(created_list).model_dump()
 
     except Exception as e:
         logger.error(sanitize_log_message(f"Failed to create traffic matching list '{name}': {e}"))
@@ -228,7 +274,7 @@ async def update_traffic_matching_list(
     settings: Settings,
     list_type: str | None = None,
     name: str | None = None,
-    items: list[str] | None = None,
+    items: list[int | str | dict[str, Any]] | None = None,
     confirm: bool | str = False,
     dry_run: bool | str = False,
 ) -> dict[str, Any]:
@@ -240,7 +286,9 @@ async def update_traffic_matching_list(
         settings: Application settings
         list_type: New list type
         name: New list name
-        items: New list items
+        items: New list items — see `create_traffic_matching_list` for the accepted shapes.
+            Validated against the list's EFFECTIVE type (`list_type` if given here,
+            otherwise the list's existing type, fetched first).
         confirm: Confirmation flag (must be True to execute)
         dry_run: If True, validate but don't update
 
@@ -256,13 +304,9 @@ async def update_traffic_matching_list(
     logger = get_logger(__name__, settings.log_level)
     _ensure_cloud_api(settings)
 
-    # Validate list type if provided
-    if list_type is not None:
-        valid_types = ["PORTS", "IPV4_ADDRESSES", "IPV6_ADDRESSES"]
-        if list_type not in valid_types:
-            raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {valid_types}")
+    if list_type is not None and list_type not in _VALID_LIST_TYPES:
+        raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}")
 
-    # Validate items if provided
     if items is not None and len(items) == 0:
         raise ValidationError("Items list cannot be empty")
 
@@ -295,7 +339,8 @@ async def update_traffic_matching_list(
 
             resolved_site_id = await client.resolve_site_id(site_id)
 
-            # Get existing list
+            # Get existing list — needed both to 404 correctly and to know the effective
+            # type against which `items` (if given without `list_type`) must validate.
             endpoint = settings.get_integration_path(
                 f"sites/{resolved_site_id}/traffic-matching-lists/{list_id}"
             )
@@ -307,6 +352,8 @@ async def update_traffic_matching_list(
             if not existing_list:
                 raise ResourceNotFoundError("traffic_matching_list", list_id)
 
+            effective_type = list_type or existing_list.get("type")
+
             # Build update data
             update_data = existing_list.copy()
 
@@ -315,7 +362,19 @@ async def update_traffic_matching_list(
             if name is not None:
                 update_data["name"] = name
             if items is not None:
-                update_data["items"] = items
+                normalised_items = [
+                    _normalise_traffic_matching_item(effective_type, item) for item in items
+                ]
+                update_data["items"] = normalised_items
+
+            # Raises pydantic.ValidationError against the real per-item schema.
+            validated = TrafficMatchingListUpdate(
+                type=update_data.get("type"),
+                name=update_data.get("name"),
+                items=update_data.get("items"),
+            )
+            if validated.items is not None:
+                update_data["items"] = validated.items
 
             endpoint = settings.get_integration_path(
                 f"sites/{resolved_site_id}/traffic-matching-lists/{list_id}"
@@ -340,7 +399,7 @@ async def update_traffic_matching_list(
                 site_id=site_id,
             )
 
-            return updated_list
+            return parse_traffic_matching_list(updated_list).model_dump()
 
     except Exception as e:
         logger.error(
