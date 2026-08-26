@@ -18,6 +18,14 @@ Workarounds:
 - Use DPI categories for application blocking at network level
 
 See tests/verification/PHASE2_FINDINGS.md for complete verification report.
+
+Re-verified 2026-08-26 against Network 10.5.67 (UDM Pro): the finding still holds.
+`/proxy/network/v2/api/site/{site}/firewall-policies/matrix` now returns a different
+error shape (`api.err.FirewallPolicyNotFound`, treating "matrix" as a policy ID rather
+than a sub-resource) but is still a 404 — the endpoint remains absent, five-plus minor
+versions later. The actual mechanism for zone-to-zone rules on current firmware is
+`firewall_policies.py`'s `create_firewall_policy`/`update_firewall_policy`, which target
+`/firewall/policies` directly (verified working) rather than a matrix view over it.
 """
 
 from typing import Any

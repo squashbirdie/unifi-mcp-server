@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-08-26 (squashbirdie fork)
+
+### Fixed
+
+- **Critical: local-mode site UUID resolution (~25 broken tools)**. Every tool that built an
+  `/ea/sites/{site_id}/...` or `/proxy/network/v2/api/site/{site_id}/...` endpoint from a raw
+  site UUID — which is what every other endpoint on the fleet actually returns — silently
+  failed against a real local controller with `api.err.NoSiteContext`, because the UUID → short
+  `internalReference` ("default") mapping was only ever built as a side effect of calling
+  `authenticate()` first, and almost no tool function did. Root-caused and fixed by adding
+  `UniFiClient._ensure_site_map()`, called unconditionally at the top of `_request()` (bounded,
+  non-recursive), plus a process-wide `_SITE_MAP_CACHE` shared across client instances so the
+  fix doesn't cost a repeated `/sites` round trip on every single tool call. Also generalized
+  `_translate_endpoint`'s UUID substitution to cover `/proxy/network/api/s/{id}/...` and
+  `/proxy/network/v2/api/site/{id}/...`, not just the original `/ea/sites/{id}/...` pattern.
+  Verified against a live UDM Pro (Network 10.5.67): 48/72 previously-failing read tools now
+  pass; the remainder are genuine controller-side gaps (Site Manager disabled by config,
+  backups/vouchers/hotspot/guest-portal/speedtest/spectrum-scan endpoints confirmed absent from
+  this firmware's local Integration API — not fork bugs).
+- **`get_application_info` 404**: hit `/integration/v1/application/info`, which does not exist
+  (`No endpoint GET /integration/v1/application/info`). The real endpoint is
+  `/integration/v1/info`, and its response is only `{"applicationVersion": "..."}` — no
+  `build`/`deploymentType`/`capabilities`/`systemInfo`, which the old code assumed unconditionally.
+- **`list_pending_devices` 400**: built `/devices/pending` as a path segment, which the
+  controller parsed as a literal `deviceId` of `"pending"`
+  (`'pending' is not a valid 'deviceId' value`). Pending devices are a filter over the plain
+  `/devices` listing (`filter=state.eq('PENDING')`), not a sub-resource.
+- **ACL rules and traffic matching lists incorrectly refused on local gateways**. Both raised
+  `NotImplementedError` unconditionally for `api_type == LOCAL`, based on the (once true, no
+  longer true) assumption that these were cloud/Integration-API-only. The local Integration API
+  mirror has supported both since it went GA (Network App >= 9.3); verified live —
+  `GET .../acl-rules` and `GET .../traffic-matching-lists` both return 200 with real data
+  against a UDM Pro on Network 10.5.67.
+- **`DPICategory`/`DPIApplication` models rejected every real response**: required a Mongo-style
+  `_id` string alias; the actual Integration API returns a plain integer `id`
+  (`{"id": 0, "name": "Instant messengers"}`). `DPIApplication` additionally required
+  `category_id`, which does not exist at this endpoint at all.
+- **`WANConnection` model rejected every real response**: required `site_id`, `wan_type`,
+  `interface`, and `status`, none of which the `/sites/{id}/wans` endpoint returns — it's just
+  `{"id": "...", "name": "Internet 1"}`. Relaxed to optional rather than invented, since no
+  endpoint that populates them was found.
+- **`TrafficMatchingList` model rejected every real response**: same `_id` alias bug, plus
+  `items` was typed as `list[str]` when the real API returns typed objects
+  (`{"type": "IP_ADDRESS", "value": "10.0.1.25"}`). Added a proper `TrafficMatchingListItem`
+  submodel.
+
+### Notes
+
+- `zbf_matrix.py`'s deprecation notice (zone-policy matrix / per-zone application blocking
+  endpoints do not exist) re-verified 2026-08-26 against Network 10.5.67 — still holds, five-plus
+  minor versions after the original 2025-11-18 finding on v10.0.156.
+- Not fixed, left as documented gaps rather than guessed at: `backups.list_backups` /
+  `get_backup_schedule` (both still fail even with a correctly-resolved site name — a deeper,
+  separate issue), and `vouchers`/`hotspot`/`guest-portal` (confirmed genuinely absent from this
+  firmware's local Integration API, not currently exposed via this deployment's tool allowlist
+  either).
+
+### Tests
+
+- Added `TestUniFiClientEnsureSiteMap` (5 tests) and 3 new `TestUniFiClientEndpointTranslation`
+  cases covering the site-map fix, including a shared-cache-across-instances regression test and
+  an end-to-end `client.get()` test with no prior `authenticate()` call — the exact shape every
+  broken tool function used.
+- Added `isolate_site_map_cache` autouse fixture to `conftest.py` — the new process-wide cache is
+  keyed by `base_url`, which several existing fixtures share, so tests need it cleared between
+  runs to stay order-independent.
+- Rewrote `test_application_tools.py`, and updated fixtures in `test_dpi_tools.py` and
+  `test_traffic_matching_lists_tools.py`, to match the corrected (real, verified) API response
+  shapes — the previous fixtures encoded the same wrong assumptions the model/endpoint fixes
+  above correct.
+- Full suite: 1,243 passing.
+
 ## [0.2.4] - 2026-02-19
 
 ### Fixed

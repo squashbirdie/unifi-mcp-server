@@ -31,3 +31,18 @@ def isolate_env_file(tmp_path, monkeypatch):
     yield
 
     # Restore working directory (handled by monkeypatch automatically)
+
+
+@pytest.fixture(autouse=True, scope="function")
+def isolate_site_map_cache():
+    """Clear UniFiClient's process-wide site UUID->name cache between tests.
+
+    The cache is keyed by `base_url`; several tests reuse the same fixture
+    base_url (e.g. mock_settings_local's "https://192.168.2.1"), so state
+    leaking from one test into the next would make results order-dependent.
+    """
+    from src.api.client import UniFiClient
+
+    UniFiClient._SITE_MAP_CACHE.clear()
+    yield
+    UniFiClient._SITE_MAP_CACHE.clear()

@@ -4,9 +4,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class DPICategory(BaseModel):
-    """DPI category model."""
+    """DPI category model.
 
-    id: str = Field(..., alias="_id", description="Category identifier")
+    Field shape corrected against a live response from the local Integration
+    API (Network 10.5.67, GET .../dpi/categories): plain `id` (an int, e.g.
+    `{"id": 0, "name": "Instant messengers"}`) — NOT the Mongo-style `_id`
+    string this model previously required, which made every category fail
+    Pydantic validation.
+    """
+
+    id: int | str = Field(..., description="Category identifier")
     name: str = Field(..., description="Category name")
     description: str | None = Field(None, description="Category description")
 
@@ -17,15 +24,22 @@ class DPICategory(BaseModel):
 
 
 class DPIApplication(BaseModel):
-    """DPI application model."""
+    """DPI application model.
 
-    id: str = Field(..., alias="_id", description="Application identifier")
+    Field shape corrected against a live response from the local Integration
+    API (Network 10.5.67, GET .../dpi/applications): entries are just
+    `{"id": <int>, "name": <str>}` — no `_id`, `category_id`, `enabled`,
+    `protocols` or `ports` at this endpoint, so those are now optional
+    instead of required (they were making every application fail validation).
+    """
+
+    id: int | str = Field(..., description="Application identifier")
     name: str = Field(..., description="Application name")
-    category_id: str = Field(..., description="Category identifier")
+    category_id: str | int | None = Field(None, description="Category identifier")
     category_name: str | None = Field(None, description="Category name")
 
     # Application metadata
-    enabled: bool = Field(True, description="Whether application detection is enabled")
+    enabled: bool | None = Field(None, description="Whether application detection is enabled")
 
     # Traffic classification
     protocols: list[str] = Field(

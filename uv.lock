@@ -2479,7 +2479,7 @@ wheels = [
 
 [[package]]
 name = "unifi-mcp-server"
-version = "0.2.4"
+version = "0.2.6"
 source = { editable = "." }
 dependencies = [
     { name = "agnost" },
@@ -2519,6 +2519,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest-asyncio" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -2555,7 +2556,10 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest-asyncio", specifier = ">=1.2.0" }]
+dev = [
+    { name = "pytest-asyncio", specifier = ">=1.2.0" },
+    { name = "ruff", specifier = ">=0.14.1" },
+]
 
 [[package]]
 name = "urllib3"

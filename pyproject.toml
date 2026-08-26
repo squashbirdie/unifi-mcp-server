@@ -1,6 +1,6 @@
 [project]
 name = "unifi-mcp-server"
-version = "0.2.5"
+version = "0.2.6"
 description = "A Model Context Protocol (MCP) server for UniFi Network API"
 authors = [
     {name = "enuno", email = "noreply@github.com"}
@@ -214,6 +214,7 @@ ignore = [
 [dependency-groups]
 dev = [
     "pytest-asyncio>=1.2.0",
+    "ruff>=0.14.1",
 ]
 
 # UV Package Manager Configuration

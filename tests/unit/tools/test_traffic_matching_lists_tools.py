@@ -40,17 +40,24 @@ async def test_list_traffic_matching_lists_success(mock_settings):
     mock_response = {
         "data": [
             {
-                "_id": "tml-1",
+                "id": "tml-1",
                 "type": "PORTS",
                 "name": "Web Ports",
-                "items": ["80", "443", "8080"],
+                "items": [
+                    {"type": "PORT", "value": "80"},
+                    {"type": "PORT", "value": "443"},
+                    {"type": "PORT", "value": "8080"},
+                ],
                 "site_id": "default",
             },
             {
-                "_id": "tml-2",
+                "id": "tml-2",
                 "type": "IPV4_ADDRESSES",
                 "name": "Blocked IPs",
-                "items": ["10.0.0.1", "10.0.0.2"],
+                "items": [
+                    {"type": "IP_ADDRESS", "value": "10.0.0.1"},
+                    {"type": "IP_ADDRESS", "value": "10.0.0.2"},
+                ],
                 "site_id": "default",
             },
         ]
@@ -79,7 +86,12 @@ async def test_list_traffic_matching_lists_success(mock_settings):
 async def test_list_traffic_matching_lists_pagination(mock_settings):
     mock_response = {
         "data": [
-            {"_id": f"tml-{i}", "type": "PORTS", "name": f"List {i}", "items": ["80"]}
+            {
+                "id": f"tml-{i}",
+                "type": "PORTS",
+                "name": f"List {i}",
+                "items": [{"type": "PORT", "value": "80"}],
+            }
             for i in range(10)
         ]
     }
@@ -122,10 +134,15 @@ async def test_list_traffic_matching_lists_empty(mock_settings):
 async def test_get_traffic_matching_list_success(mock_settings):
     mock_response = {
         "data": {
-            "_id": "tml-1",
+            "id": "tml-1",
             "type": "PORTS",
             "name": "Web Ports",
-            "items": ["80", "443", "8080", "8443"],
+            "items": [
+                {"type": "PORT", "value": "80"},
+                {"type": "PORT", "value": "443"},
+                {"type": "PORT", "value": "8080"},
+                {"type": "PORT", "value": "8443"},
+            ],
             "site_id": "default",
         }
     }
@@ -149,10 +166,13 @@ async def test_get_traffic_matching_list_success(mock_settings):
 @pytest.mark.asyncio
 async def test_get_traffic_matching_list_direct_response(mock_settings):
     mock_response = {
-        "_id": "tml-1",
+        "id": "tml-1",
         "type": "IPV6_ADDRESSES",
         "name": "IPv6 List",
-        "items": ["2001:db8::1", "2001:db8::2"],
+        "items": [
+            {"type": "IPV6_ADDRESS", "value": "2001:db8::1"},
+            {"type": "IPV6_ADDRESS", "value": "2001:db8::2"},
+        ],
     }
 
     with patch("src.tools.traffic_matching_lists.UniFiClient") as mock_client_class:

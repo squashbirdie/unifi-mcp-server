@@ -3,7 +3,7 @@
 from typing import Any
 
 from ..api.client import UniFiClient
-from ..config import APIType, Settings
+from ..config import Settings
 from ..models import ACLRule
 from ..utils import audit_action, get_logger, sanitize_log_message, validate_confirmation
 
@@ -15,12 +15,17 @@ _VALID_TYPES = ("IPV4", "MAC")
 
 
 def _ensure_cloud_api(settings: Settings) -> None:
-    """Raise if the current API type is local — ACL rules are integration-only."""
-    if settings.api_type == APIType.LOCAL:
-        raise NotImplementedError(
-            "ACL rules are only available via the UniFi integration API (cloud). "
-            "Use list_firewall_rules or list_firewall_policies for local gateway access."
-        )
+    """No-op retained for call-site compatibility.
+
+    ACL rules were long believed cloud-only; that stopped being true once the
+    Integration API shipped locally (GA on Network App >= 9.3 — see
+    Settings.get_integration_path's LOCAL branch, which already targets
+    /proxy/network/integration/v1/...). Verified live against Network 10.5.67:
+    GET .../acl-rules returns 200. Kept as a function (rather than deleting
+    every call site) in case a future controller version reintroduces a real
+    split between read and write support here.
+    """
+    return
 
 
 def _normalise_action(action: str) -> str:

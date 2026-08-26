@@ -175,6 +175,147 @@ class TestUniFiClientEndpointTranslation:
 
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_translate_local_v2_api_uuid_resolved(self, mock_settings_local):
+        """v2 API paths (built by Settings.get_v2_api_path) embed a site UUID
+        just like the /ea/sites/ pattern, and need the same resolution."""
+        client = UniFiClient(mock_settings_local)
+        client._site_uuid_to_name = {"abc-123-uuid": "default"}
+
+        result = client._translate_endpoint(
+            "/proxy/network/v2/api/site/abc-123-uuid/firewall-policies"
+        )
+        assert result == "/proxy/network/v2/api/site/default/firewall-policies"
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_translate_local_v2_api_uuid_unmapped_passthrough(self, mock_settings_local):
+        """Without a mapping, the original id is kept rather than dropped."""
+        client = UniFiClient(mock_settings_local)
+
+        result = client._translate_endpoint("/proxy/network/v2/api/site/default/firewall-policies")
+        assert result == "/proxy/network/v2/api/site/default/firewall-policies"
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_translate_local_rest_api_s_uuid_resolved(self, mock_settings_local):
+        """Callers that build /proxy/network/api/s/{id}/... directly (e.g.
+        site_vpn.py) get the same UUID -> internalReference resolution as
+        the /ea/sites/ pattern, instead of silently sending a UUID the
+        local controller rejects with api.err.NoSiteContext."""
+        client = UniFiClient(mock_settings_local)
+        client._site_uuid_to_name = {"abc-123-uuid": "default"}
+
+        result = client._translate_endpoint("/proxy/network/api/s/abc-123-uuid/rest/networkconf")
+        assert result == "/proxy/network/api/s/default/rest/networkconf"
+
+        await client.close()
+
+
+class TestUniFiClientEnsureSiteMap:
+    """Regression coverage for the lazy site-map resolution bug: most tool
+    functions never called authenticate() before making their real request,
+    so _site_uuid_to_name stayed empty and every /ea/sites/{uuid}/... or v2
+    API call sent the UUID straight through, failing with
+    api.err.NoSiteContext on a real controller."""
+
+    @pytest.mark.asyncio
+    async def test_ensure_site_map_populates_lazily(self, mock_settings_local):
+        client = UniFiClient(mock_settings_local)
+        assert client._site_uuid_to_name == {}
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '[{"id": "uuid-1", "internalReference": "default"}]'
+        mock_response.json = MagicMock(
+            return_value=[{"id": "uuid-1", "internalReference": "default"}]
+        )
+
+        with patch.object(client.client, "request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = mock_response
+            # No explicit authenticate() call here — this is the exact gap
+            # that left ~25 read-only tools broken.
+            await client._ensure_site_map()
+
+        assert client._site_uuid_to_name == {"uuid-1": "default"}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_ensure_site_map_skips_when_already_populated(self, mock_settings_local):
+        client = UniFiClient(mock_settings_local)
+        client._site_uuid_to_name = {"uuid-1": "default"}
+
+        with patch.object(client.client, "request", new_callable=AsyncMock) as mock_request:
+            await client._ensure_site_map()
+            mock_request.assert_not_called()
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_ensure_site_map_skips_for_cloud(self, mock_settings):
+        client = UniFiClient(mock_settings)  # cloud-ea, not local
+
+        with patch.object(client.client, "request", new_callable=AsyncMock) as mock_request:
+            await client._ensure_site_map()
+            mock_request.assert_not_called()
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_ensure_site_map_shared_across_instances(self, mock_settings_local):
+        """A second client against the same controller must not re-fetch —
+        the whole point of promoting the cache to class level."""
+        first = UniFiClient(mock_settings_local)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '[{"id": "uuid-1", "internalReference": "default"}]'
+        mock_response.json = MagicMock(
+            return_value=[{"id": "uuid-1", "internalReference": "default"}]
+        )
+        with patch.object(first.client, "request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = mock_response
+            await first._ensure_site_map()
+        await first.close()
+
+        second = UniFiClient(mock_settings_local)
+        assert second._site_uuid_to_name == {"uuid-1": "default"}
+        with patch.object(second.client, "request", new_callable=AsyncMock) as mock_request:
+            await second._ensure_site_map()
+            mock_request.assert_not_called()
+        await second.close()
+
+    @pytest.mark.asyncio
+    async def test_request_triggers_ensure_site_map_before_translation(self, mock_settings_local):
+        """End-to-end: a plain client.get() call for a UUID-scoped endpoint,
+        with no prior authenticate(), still resolves the site name — this is
+        the exact call shape every broken tool function used."""
+        client = UniFiClient(mock_settings_local)
+
+        sites_response = MagicMock()
+        sites_response.status_code = 200
+        sites_response.text = '[{"id": "abc-123-uuid", "internalReference": "default"}]'
+        sites_response.json = MagicMock(
+            return_value=[{"id": "abc-123-uuid", "internalReference": "default"}]
+        )
+        devices_response = MagicMock()
+        devices_response.status_code = 200
+        devices_response.text = "[]"
+        devices_response.json = MagicMock(return_value=[])
+
+        with patch.object(client.client, "request", new_callable=AsyncMock) as mock_request:
+            mock_request.side_effect = [sites_response, devices_response]
+            await client.get("/ea/sites/abc-123-uuid/devices")
+
+            assert mock_request.call_count == 2
+            first_call_url = mock_request.call_args_list[0].kwargs["url"]
+            second_call_url = mock_request.call_args_list[1].kwargs["url"]
+            assert first_call_url.endswith("/proxy/network/integration/v1/sites")
+            assert second_call_url.endswith("/proxy/network/api/s/default/stat/device")
+
+        await client.close()
+
 
 class TestUniFiClientAuthentication:
     @pytest.mark.asyncio

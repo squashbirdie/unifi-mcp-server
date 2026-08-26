@@ -329,9 +329,9 @@ async def test_list_dpi_categories_success(mock_settings):
     """Test successful DPI categories listing."""
     mock_response = {
         "data": [
-            {"_id": "cat1", "name": "Streaming"},
-            {"_id": "cat2", "name": "Social Media"},
-            {"_id": "cat3", "name": "Gaming"},
+            {"id": "cat1", "name": "Streaming"},
+            {"id": "cat2", "name": "Social Media"},
+            {"id": "cat3", "name": "Gaming"},
         ]
     }
 
@@ -370,7 +370,7 @@ async def test_list_dpi_categories_empty(mock_settings):
 @pytest.mark.asyncio
 async def test_list_dpi_categories_authenticates_if_needed(mock_settings):
     """Test that DPI categories authenticates if not already authenticated."""
-    mock_response = {"data": [{"_id": "cat1", "name": "Test"}]}
+    mock_response = {"data": [{"id": "cat1", "name": "Test"}]}
 
     mock_client = MagicMock()
     mock_client.authenticate = AsyncMock()
@@ -395,9 +395,9 @@ async def test_list_dpi_applications_success(mock_settings):
     """Test successful DPI applications listing."""
     mock_response = {
         "data": [
-            {"_id": "app1", "name": "YouTube", "category_id": "cat1"},
-            {"_id": "app2", "name": "Netflix", "category_id": "cat1"},
-            {"_id": "app3", "name": "Facebook", "category_id": "cat2"},
+            {"id": "app1", "name": "YouTube", "category_id": "cat1"},
+            {"id": "app2", "name": "Netflix", "category_id": "cat1"},
+            {"id": "app3", "name": "Facebook", "category_id": "cat2"},
         ]
     }
 
@@ -420,7 +420,7 @@ async def test_list_dpi_applications_with_params(mock_settings):
     """Test DPI applications with limit, offset, and filter."""
     mock_response = {
         "data": [
-            {"_id": "app1", "name": "YouTube", "category_id": "cat1"},
+            {"id": "app1", "name": "YouTube", "category_id": "cat1"},
         ]
     }
 

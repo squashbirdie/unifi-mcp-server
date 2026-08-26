@@ -58,6 +58,14 @@ class RateLimiter:
 class UniFiClient:
     """Async HTTP client for UniFi API with authentication and rate limiting."""
 
+    # Site UUID -> internalReference ("default", etc.) map, shared across every
+    # UniFiClient instance for a given controller within this process. Each tool
+    # function opens a fresh `async with UniFiClient(settings) as client:`, so an
+    # instance-only cache was rebuilding (and, worse, frequently NOT rebuilding —
+    # see _ensure_site_map) on every single call. Keyed by base_url so distinct
+    # controllers never collide.
+    _SITE_MAP_CACHE: dict[str, dict[str, str]] = {}
+
     def __init__(self, settings: Settings) -> None:
         """Initialize UniFi API client.
 
@@ -85,8 +93,12 @@ class UniFiClient:
 
         self._authenticated = False
         self._site_id_cache: dict[str, str] = {}
-        # Cache for site UUID -> internalReference mapping (needed for local API)
-        self._site_uuid_to_name: dict[str, str] = {}
+        # Cache for site UUID -> internalReference mapping (needed for local API).
+        # Seeded from the shared class-level cache if another instance already
+        # resolved it this process.
+        self._site_uuid_to_name: dict[str, str] = dict(
+            self._SITE_MAP_CACHE.get(settings.base_url, {})
+        )
 
     async def __aenter__(self) -> "UniFiClient":
         """Async context manager entry."""
@@ -178,6 +190,26 @@ class UniFiClient:
 
         # If no pattern matches, check if it's already a local endpoint
         if endpoint.startswith("/proxy/network/"):
+            # Local-mode callers occasionally build the `/proxy/network/...`
+            # path directly (bypassing the /ea/sites/ translation above) —
+            # e.g. site_vpn.py, and the v2 API builder in Settings. Both of
+            # those still embed a site UUID rather than the short
+            # internalReference the local controller actually accepts, so
+            # resolve it here too rather than relying on every call site to
+            # remember. Covers both known local site-scoped prefixes:
+            #   /proxy/network/api/s/{id}/...          (legacy REST)
+            #   /proxy/network/v2/api/site/{id}/...    (v2 API)
+            for prefix_pat in (
+                r"^(/proxy/network/api/s/)([^/]+)(/.*)?$",
+                r"^(/proxy/network/v2/api/site/)([^/]+)(/.*)?$",
+            ):
+                site_match = re.match(prefix_pat, endpoint)
+                if site_match:
+                    prefix, site_id, rest = site_match.groups()
+                    site_name = self._site_uuid_to_name.get(site_id, site_id)
+                    if site_id != site_name:
+                        self.logger.debug(f"Translated site ID: {site_id} -> {site_name}")
+                    return f"{prefix}{site_name}{rest or ''}"
             return endpoint
 
         # Integration API endpoints need /proxy/network prefix on local gateway
@@ -254,6 +286,34 @@ class UniFiClient:
                 self._site_uuid_to_name[site_id] = internal_ref
 
         self.logger.info(f"Built site UUID mapping: {len(self._site_uuid_to_name)} sites")
+        # Publish to the shared cache so every OTHER UniFiClient instance
+        # against this same controller skips the round trip entirely.
+        self._SITE_MAP_CACHE[self.settings.base_url] = dict(self._site_uuid_to_name)
+
+    async def _ensure_site_map(self) -> None:
+        """Lazily resolve the site UUID -> internalReference map for local-API
+        calls that need it.
+
+        Most tool functions build endpoints as `/ea/sites/{site_id}/...` (or
+        `/proxy/network/v2/api/site/{site_id}/...`) using whatever site_id the
+        caller passed in — usually the public UUID, since that is what every
+        other endpoint on this fleet returns. The local controller's own REST
+        and v2 APIs reject a UUID here with `api.err.NoSiteContext`; they only
+        accept the short internalReference ("default"). Previously this map
+        was populated only as a side effect of `authenticate()`, which most
+        tool functions never call before making their real request — silently
+        breaking every endpoint that embeds a site UUID. This makes the
+        resolution unconditional and self-healing instead of opt-in.
+        """
+        if self.settings.api_type != APIType.LOCAL or self._site_uuid_to_name:
+            return
+        cached = self._SITE_MAP_CACHE.get(self.settings.base_url)
+        if cached:
+            self._site_uuid_to_name.update(cached)
+            return
+        response = await self._request("GET", "/ea/sites")
+        sites = response if isinstance(response, list) else response.get("data", [])
+        self._build_site_uuid_map(sites)
 
     async def _request(
         self,
@@ -282,6 +342,13 @@ class UniFiClient:
         """
         # Apply rate limiting
         await self.rate_limiter.acquire()
+
+        # Resolve the site UUID->name map before any request that might need
+        # it. Skip for the bootstrap "/ea/sites" call itself — that IS the
+        # request _ensure_site_map issues to populate the map, so calling it
+        # again here would recurse forever.
+        if endpoint != "/ea/sites":
+            await self._ensure_site_map()
 
         start_time = time.time()
 

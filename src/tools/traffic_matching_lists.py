@@ -3,7 +3,7 @@
 from typing import Any
 
 from ..api import UniFiClient
-from ..config import APIType, Settings
+from ..config import Settings
 from ..models.traffic_matching_list import TrafficMatchingList, TrafficMatchingListCreate
 from ..utils import (
     ResourceNotFoundError,
@@ -18,12 +18,17 @@ from ..utils import (
 
 
 def _ensure_cloud_api(settings: Settings) -> None:
-    """Raise if the current API type is local — traffic matching lists are integration-only."""
-    if settings.api_type == APIType.LOCAL:
-        raise NotImplementedError(
-            "Traffic matching lists are only available via the UniFi integration API (cloud). "
-            "Use list_firewall_groups for local gateway access."
-        )
+    """No-op retained for call-site compatibility.
+
+    Traffic matching lists were long believed cloud-only; that stopped being
+    true once the Integration API shipped locally (GA on Network App >= 9.3
+    — see Settings.get_integration_path's LOCAL branch, which already
+    targets /proxy/network/integration/v1/...). Verified live against
+    Network 10.5.67: GET .../traffic-matching-lists returns 200 with real
+    data. Kept as a function (rather than deleting every call site) in case
+    a future controller version reintroduces a real read/write split here.
+    """
+    return
 
 
 async def list_traffic_matching_lists(

@@ -27,20 +27,18 @@ async def get_application_info(settings: Settings) -> dict:
         if not client.is_authenticated:
             await client.authenticate()
 
-        # Get application info
-        response = await client.get("/integration/v1/application/info")
+        # The real endpoint is /integration/v1/info, NOT /integration/v1/application/info
+        # — the latter 404s ("No endpoint GET /integration/v1/application/info") on every
+        # firmware tested. Response shape is also much narrower than earlier assumed:
+        # verified live against Network 10.5.67, it returns only {"applicationVersion": "..."}.
+        # No build/deploymentType/capabilities/systemInfo fields exist at this endpoint.
+        response = await client.get(settings.get_integration_path("info"))
 
-        # Extract data from response
-        if isinstance(response, list):
-            data = response[0] if response else {}
-        else:
-            _raw = response.get("data", response)
-            data = _raw[0] if isinstance(_raw, list) else _raw
+        data = response if isinstance(response, dict) else {}
+        if "data" in data and isinstance(data["data"], (dict, list)):
+            nested = data["data"]
+            data = nested[0] if isinstance(nested, list) and nested else nested
 
         return {
-            "version": data.get("version"),
-            "build": data.get("build"),
-            "deployment_type": data.get("deploymentType"),
-            "capabilities": data.get("capabilities", []),
-            "system_info": data.get("systemInfo", {}),
+            "version": data.get("applicationVersion"),
         }

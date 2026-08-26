@@ -13,13 +13,30 @@ class TrafficMatchingListType(str, Enum):
     IPV6_ADDRESSES = "IPV6_ADDRESSES"
 
 
+class TrafficMatchingListItem(BaseModel):
+    """One entry inside a traffic matching list's `items` array.
+
+    Verified live against Network 10.5.67, GET .../traffic-matching-lists:
+    each item is an object — `{"type": "IP_ADDRESS", "value": "10.0.1.25"}"`
+    — not a bare string as the list model previously assumed, which made
+    every list with any items fail validation.
+    """
+
+    type: str = Field(..., description="Item type (e.g. IP_ADDRESS, PORT)")
+    value: str = Field(..., description="Item value")
+
+    model_config = ConfigDict(extra="allow")
+
+
 class TrafficMatchingList(BaseModel):
     """UniFi Traffic Matching List configuration."""
 
-    id: str = Field(..., description="Traffic matching list ID", alias="_id")
+    id: str = Field(..., description="Traffic matching list ID")
     type: TrafficMatchingListType = Field(..., description="List type")
     name: str = Field(..., description="List name")
-    items: list[str] = Field(default_factory=list, description="List items (ports, IPs, etc.)")
+    items: list[TrafficMatchingListItem] = Field(
+        default_factory=list, description="List items (ports, IPs, etc.)"
+    )
     site_id: str | None = Field(None, description="Site ID")
 
     model_config = ConfigDict(
@@ -27,10 +44,10 @@ class TrafficMatchingList(BaseModel):
         use_enum_values=True,
         json_schema_extra={
             "example": {
-                "_id": "507f191e810c19729de860ea",
+                "id": "507f191e810c19729de860ea",
                 "type": "PORTS",
                 "name": "Common Web Ports",
-                "items": ["80", "443", "8080", "8443"],
+                "items": [{"type": "PORT", "value": "80"}, {"type": "PORT", "value": "443"}],
             }
         },
     )

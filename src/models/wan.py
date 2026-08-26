@@ -4,15 +4,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class WANConnection(BaseModel):
-    """WAN connection model."""
+    """WAN connection model.
 
-    id: str = Field(..., alias="_id", description="WAN connection identifier")
-    site_id: str = Field(..., description="Site identifier")
+    Field shape corrected against a live response from the local Integration
+    API (Network 10.5.67, GET .../sites/{id}/wans): each entry is only
+    `{"id": "...", "name": "Internet 1"}` — no `_id` alias, `site_id`,
+    `wan_type`, `interface`, `status`, or any of the statistics fields below
+    exist at this endpoint. Every one of those was previously required,
+    which made every WAN connection fail validation. Left as optional rather
+    than removed in case a future firmware version or a different endpoint
+    (e.g. per-WAN detail) starts populating them.
+    """
+
+    id: str = Field(..., description="WAN connection identifier")
+    site_id: str | None = Field(None, description="Site identifier")
     name: str = Field(..., description="WAN connection name")
 
     # Connection type
-    wan_type: str = Field(..., description="WAN type (dhcp/static/pppoe)")
-    interface: str = Field(..., description="Physical interface (eth0/eth1/etc)")
+    wan_type: str | None = Field(None, description="WAN type (dhcp/static/pppoe)")
+    interface: str | None = Field(None, description="Physical interface (eth0/eth1/etc)")
 
     # IP configuration
     ip_address: str | None = Field(None, description="WAN IP address")
@@ -21,7 +31,7 @@ class WANConnection(BaseModel):
     dns_servers: list[str] = Field(default_factory=list, description="DNS server IPs")
 
     # Connection status
-    status: str = Field(..., description="Connection status (online/offline/connecting)")
+    status: str | None = Field(None, description="Connection status (online/offline/connecting)")
     uptime: int | None = Field(None, description="Connection uptime in seconds")
 
     # Statistics

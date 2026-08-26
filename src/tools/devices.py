@@ -262,14 +262,19 @@ async def list_pending_devices(
     async with UniFiClient(settings) as client:
         await client.authenticate()
 
-        params = {}
+        # NOT /devices/pending — the integration API has no such sub-resource;
+        # it 404s trying to interpret "pending" as a deviceId
+        # ("'pending' is not a valid 'deviceId' value"). Pending devices are
+        # filtered out of the plain /devices listing, verified live against
+        # Network 10.5.67.
+        params: dict[str, Any] = {"filter": "state.eq('PENDING')"}
         if limit is not None:
             params["limit"] = limit
         if offset is not None:
             params["offset"] = offset
 
         response = await client.get(
-            f"/integration/v1/sites/{site_id}/devices/pending", params=params
+            settings.get_integration_path(f"sites/{site_id}/devices"), params=params
         )
         devices_data = response if isinstance(response, list) else response.get("data", [])
 
