@@ -1,0 +1,215 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.env.local
+.env.*.local
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# IDE and Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+coverage.json
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker
+*.tar
+*.gz
+docker-compose.override.yml
+
+# MCP Server Specific
+config.local.yaml
+*.log
+logs/
+
+# Experimental Outputs
+outputs/
+experiments/
+checkpoints/
+*.ckpt
+
+# Secrets and Credentials
+*.key
+*.pem
+*.crt
+credentials.json
+secrets.yaml
+.secrets/
+
+# gemini-cli settings
+.gemini/
+
+# GitHub App credentials
+gha-creds-*.json
+
+# Build artifacts
+*.whl
+*.tar.gz
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Local live environment test results
+test-results/
+docs/bugs/
+
+# Ad-hoc test scripts and reports generated during development
+test_cloud_*.py
+cloud_*_test*.log
+CLOUD_API_TEST_REPORT.md
+audit.log
+
+# Agent workspace artifacts
+entities.json
+mempalace.yaml
+
+# Session work notes and local test results (may contain internal IPs)
+session-work.md
+TEST_RESULTS.md
+
+# Git worktrees
+.worktrees/
+
+# API Scraper
+scripts/session-cookies.json
+scripts/screenshots/
+scripts/scraped-api-spec-*.json
+scripts/api-diff-*.json
+scripts/node_modules/
+scripts/package-lock.json
+MagicMock/
+.mcpregistry_github_token
+.mcpregistry_registry_token
+bandit-report.json
