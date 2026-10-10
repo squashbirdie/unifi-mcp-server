@@ -23,6 +23,7 @@ from .tools import diagnostics as diagnostics_tools
 from .tools import dns_management as dns_tools
 from .tools import dpi as dpi_tools
 from .tools import dpi_tools as dpi_new_tools
+from .tools import events as events_tools
 from .tools import firewall as firewall_tools
 from .tools import firewall_groups as firewall_groups_tools
 from .tools import firewall_policies as firewall_policies_tools
@@ -115,6 +116,7 @@ _LOCAL_TOOL_MODULES = [
     diagnostics_tools,
     dhcp_tools,
     dns_tools,
+    events_tools,
     devices_tools,
     dpi_tools,
     dpi_new_tools,
