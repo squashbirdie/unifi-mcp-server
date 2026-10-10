@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Speed tests, spectrum and backups errored on every call** (cherry-picked from enuno, in this order):
+  `2440987`/#127 speed-test history from the archive report; `1ebd932`/#128 spectrum data from the per-AP
+  route (`stat/spectrum-scan/{ap_mac}`, the site-wide path never existed); `a2a15c3`/#140 speed-test status from
+  the gateway device record; `77dfdbb`/#126 backups listed via the backup command and the schedule
+  read from the `auto_backup` setting; `11cec2f`/#191 the schedule from `super_mgmt` on UniFi OS consoles.
+  Live on this controller: `get_speed_test_history` (empty, no tests run), `get_speed_test_status` (`Idle`),
+  `get_spectrum_scan` (both radios of the AP, no scan results yet), `list_spectrum_interference` (empty),
+  `list_backups` (real autobackups) and `get_backup_schedule` (monthly cron) now succeed. Only reads were run;
+  speed-test trigger, backup create/restore and the other write paths were not exercised.
+  One typing fix on top: `_spectrum_scan_targets` returns `str(d["mac"])` so mypy 2.4 accepts it.
 - **Per-network and per-WLAN statistics reported the site total for every row** (enuno `5547125`/#118): the
   VLAN match paired `None == None`, so every untagged client counted against every network. Matching is now by
   network id. Live: LAN 29 + IoT 11 + Infra 6 = the 46 clients, WLANs 18 + 10 = the 28 wireless clients.
