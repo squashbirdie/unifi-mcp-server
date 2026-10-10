@@ -745,24 +745,33 @@ class UniFiClient:
             Backup file content as bytes
 
         Note:
-            This method downloads the actual backup file content.
-            For local API: /proxy/network/data/backup/{filename}
+            This method downloads the actual backup file content. For the local API the controller
+            serves scheduled backups (``autobackup_*``) from ``/proxy/network/dl/autobackup/{filename}``
+            and manual ones (what ``trigger_backup`` returns as ``download_url``) from
+            ``/proxy/network/dl/backup/{filename}``; ``/proxy/network/data/backup/{filename}`` is tried
+            last, because it 404s on Network 10.5.67 for both.
         """
         site_id = await self.resolve_site_id(site_id)
         backup_filename = validate_backup_filename(backup_filename)
         safe_name = quote(backup_filename, safe="")
 
-        # For local API
         if self.settings.api_type == APIType.LOCAL:
-            endpoint = f"/proxy/network/data/backup/{safe_name}"
+            routes = (
+                [f"/proxy/network/dl/autobackup/{safe_name}"]
+                if backup_filename.startswith("autobackup_")
+                else [f"/proxy/network/dl/backup/{safe_name}"]
+            )
+            routes.append(f"/proxy/network/data/backup/{safe_name}")
         else:
             # Cloud API
-            endpoint = f"/ea/sites/{site_id}/backups/{safe_name}/download"
+            routes = [f"/ea/sites/{site_id}/backups/{safe_name}/download"]
 
         # Use direct HTTP client for binary download
-        full_url = f"{self.settings.base_url}{endpoint}"
-
-        response = await self.client.get(full_url)
+        response = await self.client.get(f"{self.settings.base_url}{routes[0]}")
+        for endpoint in routes[1:]:
+            if response.status_code != 404:
+                break
+            response = await self.client.get(f"{self.settings.base_url}{endpoint}")
         response.raise_for_status()
 
         return response.content

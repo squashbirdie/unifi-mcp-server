@@ -909,6 +909,53 @@ class TestUniFiClientBackupMethods:
         assert mock_get.await_count == 1
         await client.close()
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("filename", "expected_first"),
+        [
+            ("autobackup_10.5.67_20261001_0430_1790829000006.unf", "/proxy/network/dl/autobackup/"),
+            ("10.5.67.unf", "/proxy/network/dl/backup/"),
+        ],
+    )
+    async def test_download_backup_local_uses_the_dl_routes(
+        self, mock_settings_local, filename, expected_first
+    ):
+        """The controller serves scheduled backups from /dl/autobackup and manual ones (the
+        trigger_backup download_url) from /dl/backup; /data/backup 404s on Network 10.5.67."""
+        client = UniFiClient(mock_settings_local)
+        ok = MagicMock(status_code=200, content=b"unf-bytes")
+        ok.raise_for_status = MagicMock()
+
+        with patch.object(client, "resolve_site_id", new=AsyncMock(return_value="site-uuid")):
+            with patch.object(client.client, "get", new=AsyncMock(return_value=ok)) as mock_get:
+                content = await client.download_backup("site-uuid", filename)
+
+        assert content == b"unf-bytes"
+        assert mock_get.await_count == 1
+        assert mock_get.await_args.args[0].endswith(expected_first + filename)
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_download_backup_local_falls_back_to_the_legacy_route_on_404(
+        self, mock_settings_local
+    ):
+        client = UniFiClient(mock_settings_local)
+        missing = MagicMock(status_code=404, content=b"")
+        ok = MagicMock(status_code=200, content=b"unf-bytes")
+        ok.raise_for_status = MagicMock()
+
+        with patch.object(client, "resolve_site_id", new=AsyncMock(return_value="site-uuid")):
+            with patch.object(
+                client.client, "get", new=AsyncMock(side_effect=[missing, ok])
+            ) as mock_get:
+                content = await client.download_backup("site-uuid", "10.5.67.unf")
+
+        assert content == b"unf-bytes"
+        urls = [c.args[0] for c in mock_get.await_args_list]
+        assert urls[0].endswith("/proxy/network/dl/backup/10.5.67.unf")
+        assert urls[1].endswith("/proxy/network/data/backup/10.5.67.unf")
+        await client.close()
+
 
 class TestUniFiClientHelpers:
     def test_looks_like_uuid_valid(self):
