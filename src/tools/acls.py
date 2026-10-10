@@ -5,7 +5,13 @@ from typing import Any
 from ..api.client import UniFiClient
 from ..config import Settings
 from ..models.acl import parse_acl_rule
-from ..utils import audit_action, get_logger, sanitize_log_message, validate_confirmation
+from ..utils import (
+    audit_action,
+    get_logger,
+    sanitize_log_message,
+    validate_confirmation,
+    validate_site_id,
+)
 
 logger = get_logger(__name__)
 
@@ -166,6 +172,7 @@ async def list_acl_rules(
     Returns:
         List of ACL rules
     """
+    site_id = validate_site_id(site_id)
     _ensure_cloud_api(settings)
     async with UniFiClient(settings) as client:
         logger.info(sanitize_log_message(f"Listing ACL rules for site {site_id}"))
@@ -202,6 +209,7 @@ async def get_acl_rule(site_id: str, acl_rule_id: str, settings: Settings) -> di
     Returns:
         ACL rule details
     """
+    site_id = validate_site_id(site_id)
     _ensure_cloud_api(settings)
     async with UniFiClient(settings) as client:
         logger.info(sanitize_log_message(f"Getting ACL rule {acl_rule_id} for site {site_id}"))
@@ -284,6 +292,7 @@ async def create_acl_rule(
     Returns:
         Created ACL rule
     """
+    site_id = validate_site_id(site_id)
     validate_confirmation(confirm, "create ACL rule", dry_run)
 
     _ensure_cloud_api(settings)
@@ -436,6 +445,7 @@ async def update_acl_rule(
     Returns:
         Updated ACL rule
     """
+    site_id = validate_site_id(site_id)
     validate_confirmation(confirm, "update ACL rule", dry_run)
 
     _ensure_cloud_api(settings)
@@ -584,6 +594,7 @@ async def delete_acl_rule(
     Returns:
         Deletion status
     """
+    site_id = validate_site_id(site_id)
     validate_confirmation(confirm, "delete ACL rule", dry_run)
 
     _ensure_cloud_api(settings)

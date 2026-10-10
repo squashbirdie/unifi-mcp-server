@@ -24,7 +24,14 @@ from typing import Any
 from ..api.client import UniFiClient
 from ..config import APIType, Settings
 from ..models.firewall_group import FirewallGroup, FirewallGroupCreate
-from ..utils import APIError, ResourceNotFoundError, get_logger, log_audit, sanitize_log_message
+from ..utils import (
+    APIError,
+    ResourceNotFoundError,
+    get_logger,
+    log_audit,
+    sanitize_log_message,
+    validate_site_id,
+)
 from ..utils.validators import coerce_bool
 
 logger = get_logger(__name__)
@@ -93,6 +100,7 @@ async def list_firewall_groups(
     Returns:
         List of firewall group dicts.
     """
+    site_id = validate_site_id(site_id)
     _ensure_local_api(settings)
 
     if group_type is not None and group_type not in _VALID_GROUP_TYPES:
@@ -125,6 +133,7 @@ async def get_firewall_group(
     settings: Settings,
 ) -> dict[str, Any]:
     """Get a single firewall group by id."""
+    site_id = validate_site_id(site_id)
     _ensure_local_api(settings)
 
     async with UniFiClient(settings) as client:
@@ -171,6 +180,7 @@ async def create_firewall_group(
         confirm: REQUIRED True for mutating operations
         dry_run: Preview without applying
     """
+    site_id = validate_site_id(site_id)
     _ensure_local_api(settings)
 
     if group_type not in _VALID_GROUP_TYPES:
@@ -229,6 +239,7 @@ async def create_port_group(
     ``ports`` accepts individual port strings (``"53"``) and ranges
     (``"9000-9010"``).
     """
+    site_id = validate_site_id(site_id)
     return await create_firewall_group(
         name=name,
         group_type="port-group",
@@ -249,6 +260,7 @@ async def create_address_group(
     dry_run: bool | str = False,
 ) -> dict[str, Any]:
     """Convenience wrapper to create an IPv4 address-group."""
+    site_id = validate_site_id(site_id)
     return await create_firewall_group(
         name=name,
         group_type="address-group",
@@ -283,6 +295,7 @@ async def update_firewall_group(
 
     ``group_members`` replaces the existing members entirely when supplied.
     """
+    site_id = validate_site_id(site_id)
     _ensure_local_api(settings)
 
     confirm_bool = coerce_bool(confirm)
@@ -359,6 +372,7 @@ async def delete_firewall_group(
     firewall policy or legacy rule references it, the UniFi controller will
     reject the delete with an error.
     """
+    site_id = validate_site_id(site_id)
     _ensure_local_api(settings)
 
     confirm_bool = coerce_bool(confirm)

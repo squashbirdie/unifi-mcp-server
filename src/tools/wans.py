@@ -3,7 +3,7 @@
 from ..api.client import UniFiClient
 from ..config import Settings
 from ..models import WANConnection
-from ..utils import get_logger, sanitize_log_message
+from ..utils import get_logger, sanitize_log_message, validate_site_id
 
 logger = get_logger(__name__)
 
@@ -21,6 +21,7 @@ async def list_wan_connections(site_id: str, settings: Settings) -> list[dict]:
         supplies only ``id`` and ``name``, so keeping the nulls would bury those
         two under 20 empty keys.
     """
+    site_id = validate_site_id(site_id)
     async with UniFiClient(settings) as client:
         logger.info(sanitize_log_message(f"Listing WAN connections for site {site_id}"))
 

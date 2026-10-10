@@ -33,7 +33,8 @@ from typing import Any
 from ..api.client import UniFiClient  # noqa: F401
 from ..config import Settings
 from ..models.zbf_matrix import ApplicationBlockRule, ZonePolicy, ZonePolicyMatrix  # noqa: F401
-from ..utils import audit_action, get_logger, validate_confirmation  # noqa: F401
+from ..utils import audit_action, get_logger, validate_confirmation  # noqa: F401, validate_site_id
+from ..utils.validators import validate_site_id
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,7 @@ async def get_zbf_matrix(site_id: str, settings: Settings) -> dict[str, Any]:
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         "get_zbf_matrix called but endpoint does not exist in UniFi API v10.0.156. "
         "Configure zone policies via UniFi Console UI instead."
@@ -96,6 +98,7 @@ async def get_zone_policies(site_id: str, zone_id: str, settings: Settings) -> l
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"get_zone_policies called for zone {zone_id} but endpoint does not exist in UniFi API v10.0.156."
     )
@@ -148,6 +151,7 @@ async def update_zbf_policy(
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"update_zbf_policy called for {source_zone_id} -> {destination_zone_id} "
         "but endpoint does not exist in UniFi API v10.0.156."
@@ -200,6 +204,7 @@ async def block_application_by_zone(
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"block_application_by_zone called for zone {zone_id}, app {application_id} "
         "but endpoint does not exist in UniFi API v10.0.156."
@@ -237,6 +242,7 @@ async def list_blocked_applications(
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"list_blocked_applications called for site {site_id} "
         "but endpoint does not exist in UniFi API v10.0.156."
@@ -277,6 +283,7 @@ async def get_zone_matrix_policy(
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"get_zone_matrix_policy called for {source_zone_id} -> {destination_zone_id} "
         "but endpoint does not exist in UniFi API v10.0.156."
@@ -322,6 +329,7 @@ async def delete_zbf_policy(
     Raises:
         NotImplementedError: This endpoint does not exist in the UniFi API
     """
+    site_id = validate_site_id(site_id)
     logger.warning(
         f"delete_zbf_policy called for {source_zone_id} -> {destination_zone_id} "
         "but endpoint does not exist in UniFi API v10.0.156."
