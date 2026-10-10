@@ -54,7 +54,9 @@ def _normalise_traffic_matching_item(list_type: str, item: Any) -> dict[str, Any
     if list_type == "PORTS":
         if isinstance(item, dict):
             if "start" not in item or "stop" not in item:
-                raise ValidationError(f"PORTS range item must have 'start' and 'stop': got {item!r}")
+                raise ValidationError(
+                    f"PORTS range item must have 'start' and 'stop': got {item!r}"
+                )
             return {"type": "PORT_NUMBER_RANGE", "start": item["start"], "stop": item["stop"]}
         return {"type": "PORT_NUMBER", "value": item}
 
@@ -196,7 +198,9 @@ async def create_traffic_matching_list(
     _ensure_cloud_api(settings)
 
     if list_type not in _VALID_LIST_TYPES:
-        raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}")
+        raise ValidationError(
+            f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}"
+        )
 
     if not items:
         raise ValidationError("Items list cannot be empty")
@@ -305,7 +309,9 @@ async def update_traffic_matching_list(
     _ensure_cloud_api(settings)
 
     if list_type is not None and list_type not in _VALID_LIST_TYPES:
-        raise ValidationError(f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}")
+        raise ValidationError(
+            f"Invalid list type '{list_type}'. Must be one of: {_VALID_LIST_TYPES}"
+        )
 
     if items is not None and len(items) == 0:
         raise ValidationError("Items list cannot be empty")

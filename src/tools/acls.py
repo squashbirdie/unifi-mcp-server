@@ -56,6 +56,7 @@ def _normalise_protocol_filter(protocols: list[str] | None) -> list[str] | None:
         raise ValueError(f"Invalid protocol(s) {invalid}. Must be a subset of {_VALID_PROTOCOLS}.")
     return upper
 
+
 def _endpoint_uses_port_filter(endpoint: dict[str, Any] | None) -> bool:
     """True if a built IP endpoint carries any port filter (`PORTS` type, or a
     `portFilter` narrowing `NETWORKS`/`IP_ADDRESSES_OR_SUBNETS`). The integration API
@@ -119,7 +120,9 @@ def _build_ip_endpoint(
         return {"type": "NETWORKS", "networkIds": network_ids, "portFilter": port_filter}
     if ports:
         if port_filter:
-            raise ValueError(f"{role}_ports already IS the port filter — don't also pass port_filter.")
+            raise ValueError(
+                f"{role}_ports already IS the port filter — don't also pass port_filter."
+            )
         return {"type": "PORTS", "portFilter": ports}
     return {
         "type": "IP_ADDRESSES_OR_SUBNETS",

@@ -268,7 +268,11 @@ async def test_create_acl_rule_with_network_filter(mock_settings):
             )
 
             payload = mock_client.post.call_args[1]["json_data"]
-            assert payload["sourceFilter"] == {"type": "NETWORKS", "networkIds": ["net-infra"], "portFilter": None}
+            assert payload["sourceFilter"] == {
+                "type": "NETWORKS",
+                "networkIds": ["net-infra"],
+                "portFilter": None,
+            }
             assert payload["destinationFilter"] == {
                 "type": "IP_ADDRESSES_OR_SUBNETS",
                 "ipAddressesOrSubnets": ["10.0.1.193"],

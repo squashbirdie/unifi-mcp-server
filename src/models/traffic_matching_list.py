@@ -144,7 +144,9 @@ TrafficMatchingList = Annotated[
     Field(discriminator="type"),
 ]
 
-_TrafficMatchingListUnion = PortTrafficMatchingList | IPv4TrafficMatchingList | IPv6TrafficMatchingList
+_TrafficMatchingListUnion = (
+    PortTrafficMatchingList | IPv4TrafficMatchingList | IPv6TrafficMatchingList
+)
 _traffic_matching_list_adapter: TypeAdapter[_TrafficMatchingListUnion] = TypeAdapter(
     TrafficMatchingList
 )

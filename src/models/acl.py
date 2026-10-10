@@ -115,9 +115,7 @@ class IPACLRule(BaseModel):
     action: Literal["ALLOW", "BLOCK"]
     description: str | None = None
     metadata: EntityMetadata
-    enforcing_device_filter: ACLRuleDeviceFilter | None = Field(
-        None, alias="enforcingDeviceFilter"
-    )
+    enforcing_device_filter: ACLRuleDeviceFilter | None = Field(None, alias="enforcingDeviceFilter")
     source_filter: IPACLRuleEndpoint | None = Field(None, alias="sourceFilter")
     destination_filter: IPACLRuleEndpoint | None = Field(None, alias="destinationFilter")
     protocol_filter: list[Literal["TCP", "UDP"]] | None = Field(None, alias="protocolFilter")
@@ -137,9 +135,7 @@ class MACACLRule(BaseModel):
     description: str | None = None
     metadata: EntityMetadata
     network_id_filter: str = Field(..., alias="networkIdFilter")
-    enforcing_device_filter: ACLRuleDeviceFilter | None = Field(
-        None, alias="enforcingDeviceFilter"
-    )
+    enforcing_device_filter: ACLRuleDeviceFilter | None = Field(None, alias="enforcingDeviceFilter")
     source_filter: MACACLRuleEndpoint | None = Field(None, alias="sourceFilter")
     destination_filter: MACACLRuleEndpoint | None = Field(None, alias="destinationFilter")
 

@@ -295,7 +295,9 @@ async def test_create_traffic_matching_list_port_range(mock_settings):
 
             assert result["items"][0]["start"] == 32768
             payload = mock_client.post.call_args[1]["json_data"]
-            assert payload["items"] == [{"type": "PORT_NUMBER_RANGE", "start": 32768, "stop": 60999}]
+            assert payload["items"] == [
+                {"type": "PORT_NUMBER_RANGE", "start": 32768, "stop": 60999}
+            ]
 
 
 @pytest.mark.asyncio
