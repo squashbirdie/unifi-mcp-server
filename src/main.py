@@ -140,6 +140,9 @@ _LOCAL_TOOL_MODULES = [
     wifi_tools,
 ]
 
+if settings.read_only:
+    logger.info("Read-only mode enabled (UNIFI_READ_ONLY) - mutating tools will not be registered")
+
 _TOOL_MODULES: list[Any] = []
 if settings.api_type in (APIType.CLOUD_V1, APIType.CLOUD_EA):
     _TOOL_MODULES = list(_CLOUD_TOOL_MODULES)

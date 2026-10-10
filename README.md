@@ -245,6 +245,7 @@ Once running in SSE mode, configure your MCP gateway to connect:
 
 ### Safety & Security
 
+- **Read-Only Mode**: Set `UNIFI_READ_ONLY=true` to register only non-mutating tools — state-changing tools are then absent from the MCP tool list entirely, rather than relying on a caller-supplied `confirm` flag
 - **Confirmation Required**: All mutating operations require explicit `confirm=True` flag
 - **Dry-Run Mode**: Preview changes before applying them with `dry_run=True`
 - **Audit Logging**: All operations logged to `audit.log` for compliance

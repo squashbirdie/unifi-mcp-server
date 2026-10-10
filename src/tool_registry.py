@@ -20,6 +20,53 @@ from typing import Any
 from fastmcp import FastMCP
 
 from .config import Settings
+from .utils.logger import get_logger
+
+#: Parameters that mark a tool as state-changing.
+#:
+#: Every mutating tool in this codebase takes a ``confirm`` and/or ``dry_run``
+#: parameter, so the signature itself is a reliable classifier — and one that
+#: stays correct as new tools are added, unlike a hand-maintained name list.
+_MUTATION_MARKERS = ("confirm", "dry_run")
+
+#: Mutating tools that do not (yet) carry a ``confirm``/``dry_run`` parameter.
+#:
+#: These are listed explicitly so read-only mode does not expose them. This set
+#: is a *classification* hint only; it does not change the tools' behaviour.
+#: Entries should be removed as the corresponding tools gain proper gates.
+#:
+#: Fork note: upstream also lists nine Protect tools; this fork has no Protect
+#: module. ``download_backup`` is added here: it does not change the controller
+#: but writes a file on the host running the server, which "read-only" must not
+#: allow (checked by enumerating the tools registered with UNIFI_READ_ONLY=true).
+MUTATING_TOOLS_WITHOUT_GATE = frozenset(
+    {
+        "download_backup",
+        "run_speed_test",
+    }
+)
+
+
+def is_mutating_tool(fn: Any) -> bool:
+    """Return whether *fn* can change controller state.
+
+    A tool counts as mutating when its signature carries one of the mutation
+    markers (``confirm``/``dry_run``), or when it is listed in
+    :data:`MUTATING_TOOLS_WITHOUT_GATE`.
+
+    Args:
+        fn: The tool function to classify.
+
+    Returns:
+        True if the tool can change state, False if it is read-only.
+    """
+    if getattr(fn, "__name__", "") in MUTATING_TOOLS_WITHOUT_GATE:
+        return True
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return True
+    return any(marker in params for marker in _MUTATION_MARKERS)
 
 
 def _make_tool_wrapper(fn: Any, settings: Settings) -> Any:
@@ -78,6 +125,7 @@ def register_module_tools(
     - Their name does not start with ``_``.
     - They are in *include* (if specified) or not in *exclude* (if specified).
     - They accept a ``settings`` parameter (otherwise registered as-is).
+    - They are non-mutating, when ``settings.read_only`` is enabled.
 
     Args:
         mcp: The FastMCP server instance.
@@ -90,6 +138,7 @@ def register_module_tools(
         List of registered tool names.
     """
     registered: list[str] = []
+    skipped: list[str] = []
     exclude_set = set(exclude or [])
 
     for name, obj in inspect.getmembers(module, inspect.isfunction):
@@ -105,6 +154,12 @@ def register_module_tools(
             continue
         if not inspect.iscoroutinefunction(obj):
             continue
+        # Read-only mode: never expose state-changing tools to the client.
+        # Filtering at registration means the tool is absent from the MCP tool
+        # list entirely, rather than relying on a caller-supplied ``confirm``.
+        if getattr(settings, "read_only", False) and is_mutating_tool(obj):
+            skipped.append(name)
+            continue
 
         params = inspect.signature(obj).parameters
         if "settings" in params:
@@ -114,5 +169,13 @@ def register_module_tools(
 
         mcp.tool()(tool_fn)
         registered.append(name)
+
+    if skipped:
+        get_logger(__name__).info(
+            "Read-only mode: skipped %d mutating tool(s) from %s: %s",
+            len(skipped),
+            module.__name__,
+            ", ".join(sorted(skipped)),
+        )
 
     return registered
