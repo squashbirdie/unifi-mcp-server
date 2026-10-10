@@ -13,11 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state are not registered, so they are absent from the tool list and a call fails with `Unknown tool`.
   Tools are classified by signature (`confirm` or `dry_run` parameter) plus `MUTATING_TOOLS_WITHOUT_GATE`
   (`run_speed_test`, and `download_backup`, which changes nothing on the controller but writes a file on the
-  host). Live: 118 of 197 tools remain; `update_wlan`, `create_firewall_policy`, `delete_acl_rule`,
+  host). Live: 124 of 205 tools remain (118 of 197 before the tools added below); `update_wlan`, `create_firewall_policy`, `delete_acl_rule`,
   `restart_device`, `adopt_device`, `download_backup`, `run_speed_test`, `trigger_backup` and `block_client`
   are absent, reads work. `test_tool_registry.py` asserts that every write-verb tool in `src/tools` is
   classified as mutating, so a new tool that forgets the markers fails the suite.
   The upstream `UNIFI_PROFILE` warning was not ported (this fork has no profiles).
+- **Read tools from enuno, cherry-picked** (all read-only, so they stay in read-only mode):
+  `list_events`, `list_alarms`, `list_neighboring_aps` (`30e0801`/#144), `list_client_rf_health` (`16be1f2`/#149),
+  `get_historical_stats` (the read half of `0a07b34`/#146) and `get_smart_queue_status` (the read half of
+  `7a7aee9`/#141). Live: events 1000 (the default limit, so large), alarms 0, neighbouring APs 268, RF health
+  for 28 wireless clients, 50 historical rows, Smart Queue disabled on Internet 1.
+- **Two write tools came with them and are hidden in read-only mode**: `start_spectrum_scan` (#146) and
+  `configure_smart_queue` (#141). Both need `confirm`; neither was run against the controller.
+  `7a7aee9` needs `first_response_item` from enuno `68630e0`/#138, which is added to `src/utils/helpers.py`
+  (only the helper; that commit's other call-site changes were not taken).
 
 ### Changed
 
@@ -33,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mypy src` is clean (was 16 errors) and `black`/`isort`/`ruff` pass. Typing-only changes (`cast`, a
   `dict[str, Any]` annotation, targeted `type: ignore`s); runtime behaviour is unchanged. The `settings: Settings = None`
   signature of `update_firewall_policy`/`delete_firewall_policy` is kept as is because `register_module_tools` injects it.
+
+### Fixed (fork-only, found by sweeping every tool against the controller)
+
+- **`get_firewall_policy` answered "not found" for predefined policies** (81 of 127 here): the controller itself
+  returns 404 on the detail route for their synthetic ids (`<24hex><24hex><index>`) although the list returns
+  them. On a 404 the tool now looks the id up in the list. Live: "Allow All Traffic" is found.
+- **`get_device_connections`/`get_port_mappings` rejected the legacy ObjectId** that `search_devices` and
+  `list_devices_by_type` return as `id`. It is now mapped to a MAC through the legacy device list. Live: the
+  ObjectId of a switch resolves to its topology node.
+- **`get_site_statistics` counted only wireless bytes** (wired clients report `wired-tx_bytes`/`wired-rx_bytes`):
+  same fallback as the per-network statistics. Live: 187 GB became 5.3 TB, in line with the per-network sums.
+- Checked and not a bug: `list_port_profiles` returns `[]` because the controller's `rest/portconf` is empty for
+  this API key.
 
 ### Fixed
 
