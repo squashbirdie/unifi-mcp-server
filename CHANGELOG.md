@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The topology had no device-to-device links, no uplinks and depth 0** (cherry-picked from enuno, in order:
+  `d83cefa`/#105, `9557286`/#135, `83919bb`/#136): device uplinks, online state and hop depth are resolved,
+  every host behind a switch port is reported, and `get_device_connections`/`get_port_mappings` resolve their
+  device id instead of silently returning nothing. They accept the integration UUID (what the topology
+  returns) or a MAC; the legacy ObjectId that `search_devices` returns is now a loud "not found" rather than an
+  empty result. Live: connections 46 to 53 (7 device uplinks with ports and 1000 Mbps full duplex), `max_depth`
+  0 to 3, device `state` 1 for the 7 online devices, `get_port_mappings` of the 8-port switch lists 7 ports with
+  the neighbour on each, `get_device_connections` 8/1/12 items for the switch, AP and Nano HD.
+- **`get_dpi_statistics` returned an empty result that looked like "no traffic"** (enuno `78c61e6`/#129): it
+  reads `stat/sitedpi` and, when the controller reports no site DPI counters, says so in a `note` and points at
+  `get_top_flows`/`get_flow_analytics`. Live: this controller (Network 10.5.67) reports none, so the result is
+  still empty but now explained; no counters were gained.
 - **Speed tests, spectrum and backups errored on every call** (cherry-picked from enuno, in this order):
   `2440987`/#127 speed-test history from the archive report; `1ebd932`/#128 spectrum data from the per-AP
   route (`stat/spectrum-scan/{ap_mac}`, the site-wide path never existed); `a2a15c3`/#140 speed-test status from
