@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] (squashbirdie fork)
+
+### Changed
+
+- **Dependency refresh** (`uv lock --upgrade`, floors in `pyproject.toml` raised to the tested versions).
+  Notable majors: `fastmcp` 3.2 -> 4.1, `mcp` 1.26 -> 2.3, `cryptography` 46 -> 50, `pydantic` 2.12 -> 2.14,
+  `authlib` 1.6 -> 1.8, `PyJWT` 2.12 -> 2.15, `urllib3` 2.6 -> 2.8; dev: `mypy` 1.18 -> 2.4, `isort` 7 -> 9,
+  `black` 26.3 -> 26.10, `pytest` 9.0 -> 9.1. No source changes were needed: 1250 unit tests pass on
+  Python 3.12 and 3.14, the stdio tool list is identical (197 tools), and 11 live read-only calls against a
+  UDM return byte-identical results before and after.
+- Note for deployers: `uvx --from <tarball>` ignores `uv.lock` and resolves from the `pyproject.toml` floors,
+  so a fresh uv cache already floated to the latest majors before this change.
+
 ## [0.2.7] - 2026-08-26 (squashbirdie fork)
 
 ### Fixed
