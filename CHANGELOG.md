@@ -45,6 +45,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (fork-only, found by sweeping every tool against the controller)
 
+- **Write tools, found by live reversible round trips against the UDM** (create, read back, change, read back,
+  delete; 9 of 12 passed first time: firewall group, disabled port forward, DHCP reservation, voucher, RADIUS
+  profile, disabled firewall policy, port profile, locate LED, hotspot package refused by the controller as
+  documented). Fixed here:
+  - `update_traffic_matching_list` sent the fetched record's `id` back in the PUT body and got
+    `400 Unknown request body property '$.id'`; it now sends only `type`, `name`, `items`.
+  - `update_radius_account` failed parsing the controller's empty PUT reply after the write had landed; it now
+    reads the account back. The controller keeps only name, password, VLAN and tunnel attributes, so `note` and
+    `enabled` are dropped; create and update now return `warnings: ["the controller did not store: ..."]`
+    instead of model defaults presented as stored values (and `create_radius_account` never sent `enabled`).
+  - `download_backup` always 404'd: the controller serves scheduled backups from `/dl/autobackup/<file>` and manual
+    ones (the `trigger_backup` `download_url`) from `/dl/backup/<file>`, not `/data/backup/<file>` (kept as the last
+    fallback). Live: the latest autobackup downloads at exactly its listed size (104000 bytes), mode `0600`;
+    `output_path="../../tmp/x"` is written inside `UNIFI_BACKUP_DOWNLOAD_DIR` under its bare name and nothing
+    escapes; four hostile `backup_filename` values are rejected.
+  - `delete_backup` used a site-less route that answers `api.err.NoSiteContext` (HTTP 401, reported as an
+    authentication failure); it now uses the site-scoped backup command like `list_backups`. **Not verified end
+    to end:** the only file available to try it on was a manual export, which the command answers with 404, and
+    scheduled backups were not touched.
+- **`trigger_backup` leaves an export on the controller**: a network-only backup (10.7 MB here) is written to
+  `/dl/backup/<version>.unf`, which `list_backups` does not show and `delete_backup` cannot remove. It is
+  overwritten by the next export, the same file the UI's "Download backup" produces. One was left behind by
+  the test run (`10.5.67.unf`).
+- Not bugs: `start_spectrum_scan` needs an explicit `ap_mac` (the AP's radios go offline, so there is no
+  all-APs default; the empty-value error is just terse).
 - **`get_firewall_policy` answered "not found" for predefined policies** (81 of 127 here): the controller itself
   returns 404 on the detail route for their synthetic ids (`<24hex><24hex><index>`) although the list returns
   them. On a 404 the tool now looks the id up in the list. Live: "Allow All Traffic" is found.
