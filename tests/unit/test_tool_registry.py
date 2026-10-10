@@ -44,6 +44,14 @@ _WRITE_VERBS = (
     "bulk",
     "download",
     "force",
+    "start",
+    "stop",
+    "enable",
+    "disable",
+    "archive",
+    "reboot",
+    "reset",
+    "clear",
 )
 
 

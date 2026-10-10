@@ -15,6 +15,7 @@ from .exceptions import (
 )
 from .helpers import (
     build_uri,
+    first_response_item,
     format_bytes,
     format_percentage,
     format_uptime,
@@ -85,6 +86,7 @@ __all__ = [
     "get_timestamp",
     "get_iso_timestamp",
     "format_uptime",
+    "first_response_item",
     "format_bytes",
     "format_percentage",
     "sanitize_dict",
