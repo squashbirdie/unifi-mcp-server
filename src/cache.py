@@ -20,9 +20,9 @@ except ImportError:
     REDIS_AVAILABLE = False
     from typing import Any
 
-    redis = None  # type: Any
-    Redis: Any = None
-    RedisError: Any = Exception
+    redis = None  # type: ignore[assignment]
+    Redis: Any = None  # type: ignore[no-redef]
+    RedisError: Any = Exception  # type: ignore[no-redef]
 
 from .config import Settings
 from .utils import get_logger

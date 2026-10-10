@@ -698,7 +698,7 @@ async def create_firewall_policy(
 async def update_firewall_policy(
     policy_id: str,
     site_id: str = "default",
-    settings: Settings = None,
+    settings: Settings = None,  # type: ignore[assignment]  # injected by register_module_tools
     name: str | None = None,
     action: str | None = None,
     enabled: bool | None = None,
@@ -966,7 +966,7 @@ async def update_firewall_policy(
 async def delete_firewall_policy(
     policy_id: str,
     site_id: str = "default",
-    settings: Settings = None,
+    settings: Settings = None,  # type: ignore[assignment]  # injected by register_module_tools
     confirm: bool | str = False,
     dry_run: bool | str = False,
 ) -> dict[str, Any]:

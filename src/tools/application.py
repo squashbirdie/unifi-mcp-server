@@ -1,5 +1,7 @@
 """Application information tools."""
 
+from typing import Any, cast
+
 from ..api.client import UniFiClient
 from ..config import Settings
 from ..utils import get_logger
@@ -37,7 +39,9 @@ async def get_application_info(settings: Settings) -> dict:
         data = response if isinstance(response, dict) else {}
         if "data" in data and isinstance(data["data"], (dict, list)):
             nested = data["data"]
-            data = nested[0] if isinstance(nested, list) and nested else nested
+            data = cast(
+                "dict[str, Any]", nested[0] if isinstance(nested, list) and nested else nested
+            )
 
         return {
             "version": data.get("applicationVersion"),

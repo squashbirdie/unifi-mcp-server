@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python 3.12 and 3.14, the stdio tool list is identical (197 tools), and 11 live read-only calls against a
   UDM return byte-identical results before and after.
 - Note for deployers: `uvx --from <tarball>` ignores `uv.lock` and resolves from the `pyproject.toml` floors,
-  so a fresh uv cache already floated to the latest majors before this change.
+  so a fresh uv cache already floated to the latest majors before this change. `fastmcp` is now capped `<5` and
+  `mcp[cli]` `<3` so it cannot float to an untested major.
+- `mypy src` is clean (was 16 errors) and `black`/`isort`/`ruff` pass. Typing-only changes (`cast`, a
+  `dict[str, Any]` annotation, targeted `type: ignore`s); runtime behaviour is unchanged. The `settings: Settings = None`
+  signature of `update_firewall_policy`/`delete_firewall_policy` is kept as is because `register_module_tools` injects it.
 
 ## [0.2.7] - 2026-08-26 (squashbirdie fork)
 
