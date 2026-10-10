@@ -772,3 +772,94 @@ class TestUniFiClientHelpers:
 
     def test_looks_like_uuid_empty(self):
         assert UniFiClient._looks_like_uuid("") is False
+
+
+SITE_UUID = "88f7af54-98f8-306a-a1c7-c9349722b1f6"
+
+
+class TestIntegrationSiteResolution:
+    """The local Integration API only accepts the site UUID; "default" gets
+    `400 api.request.argument-type-mismatch`. wans, vpn, vouchers, hotspot,
+    switching, device-tags, radius profiles, pending devices and others build those
+    paths by hand from the caller's site_id, so the client resolves it."""
+
+    @staticmethod
+    def _local_client(mock_settings_local):
+        mock_settings_local.get_integration_path = lambda p: f"/proxy/network/integration/v1/{p}"
+        return UniFiClient(mock_settings_local)
+
+    @staticmethod
+    def _fake_controller(requested_urls):
+        def respond(method, url, params=None, json=None):
+            requested_urls.append(url)
+            response = MagicMock()
+            response.status_code = 200
+            body = (
+                [{"id": SITE_UUID, "internalReference": "default", "name": "Default"}]
+                if url.endswith("/integration/v1/sites")
+                else {"data": []}
+            )
+            response.json = MagicMock(return_value=body)
+            response.text = "x"
+            return response
+
+        return respond
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/integration/v1/sites/default/wans",
+            "/proxy/network/integration/v1/sites/default/wans",
+        ],
+    )
+    async def test_short_name_is_sent_as_uuid(self, mock_settings_local, endpoint):
+        client = self._local_client(mock_settings_local)
+        urls: list[str] = []
+        with patch.object(client.client, "request", side_effect=self._fake_controller(urls)):
+            await client.get(endpoint)
+
+        assert urls[-1].endswith(f"/proxy/network/integration/v1/sites/{SITE_UUID}/wans")
+        assert not any("/sites/default/" in u for u in urls)
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_remainder_of_path_is_preserved(self, mock_settings_local):
+        client = self._local_client(mock_settings_local)
+        urls: list[str] = []
+        with patch.object(client.client, "request", side_effect=self._fake_controller(urls)):
+            await client.post("/integration/v1/sites/default/clients/aa:bb:cc/action", json_data={})
+
+        assert urls[-1].endswith(f"/integration/v1/sites/{SITE_UUID}/clients/aa:bb:cc/action")
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_uuid_and_non_integration_paths_cost_no_extra_lookup(self, mock_settings_local):
+        client = self._local_client(mock_settings_local)
+        client._site_uuid_to_name = {SITE_UUID: "default"}  # site map already known
+        with patch.object(client.client, "request", side_effect=self._fake_controller([])) as req:
+            await client.get(f"/integration/v1/sites/{SITE_UUID}/wans")
+            await client.get("/ea/sites/default/rest/networkconf")
+            await client.get("/proxy/network/integration/v1/sites")
+
+        # Three calls out, no site-list round trip added by the resolver.
+        assert req.call_count == 3
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_unknown_site_name_raises_not_found(self, mock_settings_local):
+        client = self._local_client(mock_settings_local)
+        client._site_uuid_to_name = {SITE_UUID: "default"}
+        with patch.object(client.client, "request", side_effect=self._fake_controller([])):
+            with pytest.raises(ResourceNotFoundError):
+                await client.get("/integration/v1/sites/no-such-site/wans")
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_cloud_mode_endpoint_untouched(self, mock_settings):
+        client = UniFiClient(mock_settings)  # cloud-ea
+        assert (
+            await client._resolve_integration_site("/integration/v1/sites/default/wans")
+            == "/integration/v1/sites/default/wans"
+        )
+        await client.close()

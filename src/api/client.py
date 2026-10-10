@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 from typing import Any
 from uuid import UUID
@@ -315,6 +316,37 @@ class UniFiClient:
         sites = response if isinstance(response, list) else response.get("data", [])
         self._build_site_uuid_map(sites)
 
+    async def _resolve_integration_site(self, endpoint: str) -> str:
+        """Swap a short site name for its UUID in Integration API paths.
+
+        The local controller's Integration API (`/integration/v1/sites/{siteId}/...`)
+        only accepts the site UUID and answers a short name such as "default" with
+        `400 api.request.argument-type-mismatch`. Every other tool family takes the
+        short name happily, so callers pass "default" everywhere and the tools that
+        build Integration paths by hand (wans, vpn, vouchers, hotspot, switching,
+        reference data, ...) broke. Resolve it here, once, instead of at each call
+        site. UUIDs pass through untouched, so existing callers keep working.
+
+        Args:
+            endpoint: Request path as passed to ``_request``.
+
+        Returns:
+            The endpoint with a UUID site segment, or the original endpoint when it
+            is not a local Integration API site path or already carries a UUID.
+
+        Raises:
+            ResourceNotFoundError: If the site name matches no site on the controller.
+        """
+        if self.settings.api_type != APIType.LOCAL:
+            return endpoint
+        match = re.match(r"^((?:/proxy/network)?/integration/v1/sites/)([^/?]+)(.*)$", endpoint)
+        if not match:
+            return endpoint
+        prefix, site, rest = match.groups()
+        if self._looks_like_uuid(site):
+            return endpoint
+        return f"{prefix}{await self.resolve_site_id(site)}{rest}"
+
     async def _request(
         self,
         method: str,
@@ -349,6 +381,7 @@ class UniFiClient:
         # again here would recurse forever.
         if endpoint != "/ea/sites":
             await self._ensure_site_map()
+            endpoint = await self._resolve_integration_site(endpoint)
 
         start_time = time.time()
 

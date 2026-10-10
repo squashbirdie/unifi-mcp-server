@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dict[str, Any]` annotation, targeted `type: ignore`s); runtime behaviour is unchanged. The `settings: Settings = None`
   signature of `update_firewall_policy`/`delete_firewall_policy` is kept as is because `register_module_tools` injects it.
 
+### Fixed
+
+- **Integration API paths rejected the short site name** (`'default' is not a valid 'siteId' value`,
+  `400 api.request.argument-type-mismatch`). `UniFiClient._request` now rewrites a non-UUID site segment in
+  local `/integration/v1/sites/{site}/...` paths to the site UUID (`_resolve_integration_site`, reusing
+  `resolve_site_id` and its cache), so every tool that builds those paths by hand works with `site_id="default"`.
+  Verified live: `list_pending_devices`, `list_wan_connections`, `list_site_to_site_vpns`, `list_vpn_servers`,
+  `list_device_tags`, `list_radius_profiles`, `list_switch_stacks`, `list_lags` and `list_mclag_domains` now
+  succeed with `default`; an unknown name raises a clear `site 'x' not found`. Not yet fixed, separate cause:
+  `list_vouchers`, `list_hotspot_packages` and `get_guest_portal_config` now reach the right site but the
+  controller answers 404 because those Integration endpoints do not exist (enuno/unifi-mcp-server #122, #123
+  and #130 move them to the routes that do).
+
 ## [0.2.7] - 2026-08-26 (squashbirdie fork)
 
 ### Fixed
