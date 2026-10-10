@@ -34,6 +34,7 @@ from .sanitize import (
 )
 from .validators import (
     coerce_bool,
+    validate_backup_filename,
     validate_confirmation,
     validate_device_id,
     validate_ip_address,
@@ -78,6 +79,7 @@ __all__ = [
     "validate_site_id",
     "validate_device_id",
     "validate_confirmation",
+    "validate_backup_filename",
     "validate_limit_offset",
     # Helpers
     "get_timestamp",
