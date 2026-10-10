@@ -30,10 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resolve_site_id` and its cache), so every tool that builds those paths by hand works with `site_id="default"`.
   Verified live: `list_pending_devices`, `list_wan_connections`, `list_site_to_site_vpns`, `list_vpn_servers`,
   `list_device_tags`, `list_radius_profiles`, `list_switch_stacks`, `list_lags` and `list_mclag_domains` now
-  succeed with `default`; an unknown name raises a clear `site 'x' not found`. Not yet fixed, separate cause:
-  `list_vouchers`, `list_hotspot_packages` and `get_guest_portal_config` now reach the right site but the
-  controller answers 404 because those Integration endpoints do not exist (enuno/unifi-mcp-server #122, #123
-  and #130 move them to the routes that do).
+  succeed with `default`; an unknown name raises a clear `site 'x' not found`.
+- **Vouchers, hotspot packages and the guest portal called endpoints that do not exist** (404 on every
+  controller). Cherry-picked from enuno/unifi-mcp-server; the list/get calls were verified live on this fork's
+  controller (empty vouchers and packages, guest portal config returned), the create/update/delete paths were
+  only exercised by the unit tests that came with the upstream commits:
+  - `24e2d41` (#122): vouchers use `/v1/sites/{siteId}/hotspot/vouchers` with the documented shape.
+    `create_vouchers` now takes the documented `name` and `timeLimitMinutes` (the old `duration`/`qos_*`
+    parameters were never accepted by the controller); `bulk_delete_vouchers` refuses an empty filter.
+  - `52827e9` (#123): hotspot packages use the classic `rest/hotspotpackage` surface; the bandwidth, quota and
+    enabled parameters the controller ignored are removed.
+  - `44d299b` (#130): `get_guest_portal_config`/`configure_guest_portal` read and write `setting/guest_access`,
+    secrets (`x_*`) stripped; new `portal_enabled` switch.
+  - The a2a playbook hunks of those commits were dropped (this fork has no a2a).
+- **`list_wan_connections` padded its output with values the controller never sent** (`dns_servers: []`,
+  `is_backup: false`, 20 null keys). Unreported fields now default to `None` and are omitted from the result
+  (same as enuno `8130851`/#103, reimplemented because the fork already had the optional-fields half).
 
 ## [0.2.7] - 2026-08-26 (squashbirdie fork)
 

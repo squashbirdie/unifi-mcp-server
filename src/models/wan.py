@@ -28,7 +28,7 @@ class WANConnection(BaseModel):
     ip_address: str | None = Field(None, description="WAN IP address")
     netmask: str | None = Field(None, description="Subnet mask")
     gateway: str | None = Field(None, description="Gateway IP")
-    dns_servers: list[str] = Field(default_factory=list, description="DNS server IPs")
+    dns_servers: list[str] | None = Field(None, description="DNS server IPs")
 
     # Connection status
     status: str | None = Field(None, description="Connection status (online/offline/connecting)")
@@ -50,7 +50,7 @@ class WANConnection(BaseModel):
     failover_priority: int | None = Field(
         None, description="Failover priority (lower = higher priority)"
     )
-    is_backup: bool = Field(False, description="Whether this is a backup WAN")
+    is_backup: bool | None = Field(None, description="Whether this is a backup WAN")
 
     # ISP information
     isp_name: str | None = Field(None, description="ISP name")
