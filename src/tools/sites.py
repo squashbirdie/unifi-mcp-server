@@ -177,9 +177,10 @@ async def get_site_statistics(site_id: str, settings: Settings) -> dict[str, Any
         wired_clients = sum(1 for c in clients_data if c.get("is_wired") is True)
         wireless_clients = len(clients_data) - wired_clients
 
-        # Calculate total bandwidth
-        total_tx = sum(c.get("tx_bytes", 0) for c in clients_data)
-        total_rx = sum(c.get("rx_bytes", 0) for c in clients_data)
+        # Calculate total bandwidth. Wired clients report their counters under the
+        # "wired-" keys, not tx_bytes/rx_bytes (same fallback as the per-network statistics).
+        total_tx = sum(c.get("tx_bytes") or c.get("wired-tx_bytes") or 0 for c in clients_data)
+        total_rx = sum(c.get("rx_bytes") or c.get("wired-rx_bytes") or 0 for c in clients_data)
 
         statistics = {
             "site_id": site_id,

@@ -278,6 +278,33 @@ class TestGetSiteStatistics:
             assert result["bandwidth"]["total_bytes"] == 5000
 
     @pytest.mark.asyncio
+    async def test_get_site_statistics_counts_wired_client_traffic(self, mock_settings):
+        """Wired clients report ``wired-tx_bytes``/``wired-rx_bytes``; tx_bytes is absent or null."""
+        clients_response = [
+            {
+                "mac": "aa:bb:cc:dd:ee:ff",
+                "is_wired": True,
+                "wired-tx_bytes": 7000,
+                "wired-rx_bytes": 300,
+            },
+            {"mac": "ab:bb:cc:dd:ee:ff", "is_wired": True, "tx_bytes": None, "wired-tx_bytes": 100},
+            {"mac": "11:22:33:44:55:66", "is_wired": False, "tx_bytes": 500, "rx_bytes": 1500},
+        ]
+
+        with patch("src.tools.sites.UniFiClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.authenticate = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=[[], clients_response, []])
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            result = await get_site_statistics("default", mock_settings)
+
+        assert result["bandwidth"]["total_tx_bytes"] == 7000 + 100 + 500
+        assert result["bandwidth"]["total_rx_bytes"] == 300 + 1500
+
+    @pytest.mark.asyncio
     async def test_get_site_statistics_with_dict_responses(self, mock_settings):
         devices_response = {"data": [{"_id": "ap1", "type": "uap", "state": 1}]}
         clients_response = {
