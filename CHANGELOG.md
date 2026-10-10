@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Per-network and per-WLAN statistics reported the site total for every row** (enuno `5547125`/#118): the
+  VLAN match paired `None == None`, so every untagged client counted against every network. Matching is now by
+  network id. Live: LAN 29 + IoT 11 + Infra 6 = the 46 clients, WLANs 18 + 10 = the 28 wireless clients.
+- **Wired clients reported null/0 traffic** (enuno `a8a5584`/#119): reads the `wired-tx_bytes`/`wired-rx_bytes`
+  keys wired clients actually report. Live: a wired client went from 0 to 6.5 GB tx.
+- **`get_device_details` failed for every identifier** (ported by hand from enuno `8a771e0`/#183 and `7c8d52e`/#109):
+  the integration UUID path failed model validation (legacy `Device` model on an integration reply), a legacy
+  ObjectId (what `search_devices` returns) was never matched, and a MAC was rejected. It now accepts all three
+  and returns the new `IntegrationDevice` model (`src/models/integration_api.py`, a subset of upstream's file).
+  The firewall-policy enum relaxation from #183 was not taken: policy reads work here. Not taken either:
+  `abf317e`/#189, which moves device search to the integration API for API-key access; the legacy route
+  already accepts the key on this controller.
+- **`list_wlans` returned WPA passphrases in cleartext** (enuno `3c96943`/#185): `x_passphrase`, `x_iapp_key`
+  and private pre-shared key passwords are now `***REDACTED***` in `list_wlans`, `create_wlan` and `update_wlan`.
+  A scan of every id-free `list_*`/`get_*`/`search_*` tool for secret-looking field names found no other leak.
 - **Integration API paths rejected the short site name** (`'default' is not a valid 'siteId' value`,
   `400 api.request.argument-type-mismatch`). `UniFiClient._request` now rewrites a non-UUID site segment in
   local `/integration/v1/sites/{site}/...` paths to the site UUID (`_resolve_integration_site`, reusing
