@@ -385,9 +385,13 @@ async def update_traffic_matching_list(
             endpoint = settings.get_integration_path(
                 f"sites/{resolved_site_id}/traffic-matching-lists/{list_id}"
             )
+            # The PUT schema is {type, name, items}. The fetched record also carries "id" (and may
+            # carry other read-only keys); the controller rejects them with
+            # 400 "Unknown request body property '$.id'", so send only the writable fields.
+            put_body = {k: update_data[k] for k in ("type", "name", "items") if k in update_data}
             response = await client.put(
                 endpoint,
-                json_data=update_data,
+                json_data=put_body,
             )
             updated_list: dict[str, Any] = (
                 response if isinstance(response, list) else response.get("data", response)

@@ -470,6 +470,8 @@ async def test_update_traffic_matching_list_success(mock_settings):
                 {"type": "PORT_NUMBER", "value": 80},
                 {"type": "PORT_NUMBER", "value": 443},
             ]
+            # Regression: the controller answers 400 "Unknown request body property '$.id'"
+            assert set(payload) == {"type", "name", "items"}
 
 
 @pytest.mark.asyncio
