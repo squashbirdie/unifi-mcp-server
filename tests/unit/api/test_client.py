@@ -956,6 +956,27 @@ class TestUniFiClientBackupMethods:
         assert urls[1].endswith("/proxy/network/data/backup/10.5.67.unf")
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_delete_backup_local_uses_the_site_scoped_backup_command(
+        self, mock_settings_local
+    ):
+        """The site-less DELETE /api/backup/delete-backup/<file> answers api.err.NoSiteContext
+        (on an HTTP 401, which reads as an authentication failure); the backup command works."""
+        client = UniFiClient(mock_settings_local)
+        client._site_uuid_to_name = {"site-uuid": "default"}
+
+        with patch.object(client, "resolve_site_id", new=AsyncMock(return_value="site-uuid")):
+            with patch.object(
+                client, "post", new=AsyncMock(return_value={"data": []})
+            ) as mock_post:
+                await client.delete_backup("site-uuid", "10.5.67.unf")
+
+        mock_post.assert_awaited_once_with(
+            "/proxy/network/api/s/default/cmd/backup",
+            json_data={"cmd": "delete-backup", "filename": "10.5.67.unf"},
+        )
+        await client.close()
+
 
 class TestUniFiClientHelpers:
     def test_looks_like_uuid_valid(self):

@@ -791,20 +791,24 @@ class UniFiClient:
             Deletion confirmation response
 
         Note:
-            For local API: DELETE /proxy/network/api/backup/delete-backup/{filename}
+            For the local API this uses the site-scoped backup command, like ``list_backups``:
+            POST /proxy/network/api/s/{site}/cmd/backup with ``{"cmd": "delete-backup", "filename": ...}``.
+            The earlier site-less ``DELETE /api/backup/delete-backup/{filename}`` has no site context and
+            the controller answers it with api.err.NoSiteContext on an HTTP 401 (reported here as an
+            authentication failure).
         """
         site_id = await self.resolve_site_id(site_id)
         backup_filename = validate_backup_filename(backup_filename)
-        safe_name = quote(backup_filename, safe="")
 
-        # For local API
         if self.settings.api_type == APIType.LOCAL:
-            endpoint = f"/proxy/network/api/backup/delete-backup/{safe_name}"
-        else:
-            # Cloud API
-            endpoint = f"/ea/sites/{site_id}/backups/{safe_name}"
+            site_name = self._site_uuid_to_name.get(site_id, site_id)
+            return await self.post(
+                f"/proxy/network/api/s/{site_name}/cmd/backup",
+                json_data={"cmd": "delete-backup", "filename": backup_filename},
+            )
 
-        return await self.delete(endpoint)
+        # Cloud API
+        return await self.delete(f"/ea/sites/{site_id}/backups/{quote(backup_filename, safe='')}")
 
     async def restore_backup(
         self,
