@@ -433,12 +433,21 @@ async def get_firewall_policy(
         if not client.is_authenticated:
             await client.authenticate()
 
-        endpoint = f"{settings.get_v2_api_path(site_id)}/firewall-policies/{policy_id}"
+        base_endpoint = f"{settings.get_v2_api_path(site_id)}/firewall-policies"
 
         try:
-            response = await client.get(endpoint)
+            response = await client.get(f"{base_endpoint}/{policy_id}")
         except ResourceNotFoundError as err:
-            raise ResourceNotFoundError("firewall_policy", policy_id) from err
+            # Predefined (system-derived) policies carry synthetic ids that the list endpoint
+            # returns but the detail route answers 404 for, so look the policy up in the list.
+            listing = await client.get(base_endpoint)
+            candidates = listing if isinstance(listing, list) else listing.get("data", [])
+            match = next(
+                (p for p in candidates if isinstance(p, dict) and p.get("_id") == policy_id), None
+            )
+            if match is None:
+                raise ResourceNotFoundError("firewall_policy", policy_id) from err
+            response = match
 
         # Handle both wrapped and unwrapped responses
         if isinstance(response, dict) and "data" in response:

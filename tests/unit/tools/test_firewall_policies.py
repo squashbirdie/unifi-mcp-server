@@ -360,6 +360,54 @@ class TestGetFirewallPolicy:
             assert "firewall_policy" in str(exc_info.value)
 
     @pytest.mark.asyncio
+    async def test_get_firewall_policy_predefined_id_found_via_list(
+        self, local_settings: Settings, sample_policy: dict
+    ) -> None:
+        """The detail route 404s on a predefined policy's synthetic id, the list returns it."""
+        from src.tools.firewall_policies import get_firewall_policy
+        from src.utils.exceptions import ResourceNotFoundError
+
+        synthetic_id = "6783fd6dc5163d006eff524d6783fd6dc5163d006eff524d2147483647"
+        predefined = {**sample_policy, "_id": synthetic_id, "name": "Allow All Traffic"}
+
+        async def get(endpoint: str, *args, **kwargs):
+            if endpoint.endswith(f"/firewall-policies/{synthetic_id}"):
+                raise ResourceNotFoundError("firewall_policy", synthetic_id)
+            return [sample_policy, predefined]
+
+        with patch("src.tools.firewall_policies.UniFiClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value.__aenter__.return_value = mock_client
+            mock_client.is_authenticated = True
+            mock_client.get.side_effect = get
+
+            result = await get_firewall_policy(synthetic_id, "default", local_settings)
+
+        assert result["name"] == "Allow All Traffic"
+        assert result["id"] == synthetic_id
+
+    @pytest.mark.asyncio
+    async def test_get_firewall_policy_unknown_id_not_in_list_is_not_found(
+        self, local_settings: Settings, sample_policy: dict
+    ) -> None:
+        from src.tools.firewall_policies import get_firewall_policy
+        from src.utils.exceptions import ResourceNotFoundError
+
+        async def get(endpoint: str, *args, **kwargs):
+            if endpoint.endswith("/firewall-policies/nope"):
+                raise ResourceNotFoundError("firewall_policy", "nope")
+            return [sample_policy]
+
+        with patch("src.tools.firewall_policies.UniFiClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value.__aenter__.return_value = mock_client
+            mock_client.is_authenticated = True
+            mock_client.get.side_effect = get
+
+            with pytest.raises(ResourceNotFoundError):
+                await get_firewall_policy("nope", "default", local_settings)
+
+    @pytest.mark.asyncio
     async def test_get_firewall_policy_cloud_api_raises_error(
         self, cloud_settings: Settings
     ) -> None:
