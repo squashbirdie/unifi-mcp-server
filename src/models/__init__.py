@@ -26,6 +26,7 @@ from .firewall_policy import (
     Schedule,
 )
 from .firewall_zone import FirewallZone
+from .integration_api import IntegrationDevice
 from .network import Network
 from .port_profile import PortOverride, PortProfile, PortTableEntry
 from .qos_profile import MatchCriteria, RouteAction, RouteSchedule, TrafficRoute
@@ -54,6 +55,7 @@ from .zbf_matrix import ApplicationBlockRule, ZoneNetworkAssignment, ZonePolicy,
 __all__ = [
     "Site",
     "Device",
+    "IntegrationDevice",
     "Client",
     "Network",
     "IPACLRule",

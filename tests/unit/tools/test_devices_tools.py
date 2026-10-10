@@ -63,50 +63,119 @@ def make_device(
     }
 
 
+INTEGRATION_UUID = "11111111-2222-4333-8444-555555555555"
+
+
+def make_integration_device(mac="24:5A:4C:18:8C:D5", name="USW Flex Mini"):
+    """A device as the Integration API reports it: macAddress, string state, no type."""
+    return {
+        "id": INTEGRATION_UUID,
+        "macAddress": mac,
+        "ipAddress": "10.0.1.5",
+        "name": name,
+        "model": "USMINI",
+        "state": "ONLINE",
+        "supported": True,
+        "firmwareVersion": "2.1.0",
+        "features": ["switching"],
+    }
+
+
+def details_client(*, direct=None, listing=(), legacy=()):
+    """Mock client routing get() by path: detail route, device list, legacy stats list."""
+
+    async def get(path, params=None):
+        if "/integration/" in path and "/devices/" in path:
+            # The detail route only knows the integration UUID; anything else is a 404.
+            if direct is None or not path.endswith(f"/devices/{INTEGRATION_UUID}"):
+                raise ResourceNotFoundError("device", path.rsplit("/", 1)[-1])
+            return direct
+        if "/integration/" in path and path.endswith("/devices"):
+            return {"data": list(listing)}
+        if path.startswith("/ea/sites/") and path.endswith("/devices"):
+            return {"data": list(legacy)}
+        raise AssertionError(f"unexpected path {path}")
+
+    client = create_mock_client(None)
+    client.get = AsyncMock(side_effect=get)
+    client.resolve_site_id = AsyncMock(return_value="site-uuid")
+    return client
+
+
+@pytest.fixture
+def integration_settings(mock_settings):
+    mock_settings.get_integration_path = lambda p: f"/integration/v1/{p}"
+    return mock_settings
+
+
 class TestGetDeviceDetails:
-    @pytest.mark.asyncio
-    async def test_get_device_details_success(self, mock_settings):
-        mock_response = {"data": [make_device(DEVICE_ID_1, "AP-Living")]}
-
-        with patch("src.tools.devices.UniFiClient") as mock_client_class:
-            mock_client_class.return_value = create_mock_client(mock_response)
-
-            result = await get_device_details("site-1", DEVICE_ID_1, mock_settings)
-
-            assert result["id"] == DEVICE_ID_1
-            assert result["name"] == "AP-Living"
+    """Devices have three identifier spaces: integration UUID (topology), legacy ObjectId
+    (what search_devices / list_devices_by_type return) and MAC. The integration API keys
+    records by UUID only, so the other two have to be resolved through the device list."""
 
     @pytest.mark.asyncio
-    async def test_get_device_details_list_response(self, mock_settings):
-        mock_response = [make_device(DEVICE_ID_2, "Switch-Main")]
+    async def test_integration_uuid_direct_lookup(self, integration_settings):
+        client = details_client(direct={"data": make_integration_device()})
+        with patch("src.tools.devices.UniFiClient", return_value=client):
+            result = await get_device_details("site-1", INTEGRATION_UUID, integration_settings)
 
-        with patch("src.tools.devices.UniFiClient") as mock_client_class:
-            mock_client_class.return_value = create_mock_client(mock_response)
-
-            result = await get_device_details("site-1", DEVICE_ID_2, mock_settings)
-
-            assert result["id"] == DEVICE_ID_2
-            assert result["name"] == "Switch-Main"
+        assert result["id"] == INTEGRATION_UUID
+        assert result["mac_address"] == "24:5A:4C:18:8C:D5"
+        assert result["state"] == "ONLINE"
+        assert "type" not in result  # the Integration API reports none; do not invent one
 
     @pytest.mark.asyncio
-    async def test_get_device_details_not_found(self, mock_settings):
-        mock_response = {"data": [make_device(DEVICE_ID_1)]}
+    async def test_legacy_object_id_resolves_through_the_mac(self, integration_settings):
+        client = details_client(
+            listing=[make_integration_device()],
+            legacy=[{"_id": DEVICE_ID_1, "mac": "24:5a:4c:18:8c:d5"}],
+        )
+        with patch("src.tools.devices.UniFiClient", return_value=client):
+            result = await get_device_details("site-1", DEVICE_ID_1, integration_settings)
 
-        with patch("src.tools.devices.UniFiClient") as mock_client_class:
-            mock_client_class.return_value = create_mock_client(mock_response)
+        assert result["id"] == INTEGRATION_UUID
+        assert result["name"] == "USW Flex Mini"
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mac", ["24:5a:4c:18:8c:d5", "24:5A:4C:18:8C:D5", "24-5a-4c-18-8c-d5"])
+    async def test_mac_address_matches_case_insensitively(self, integration_settings, mac):
+        client = details_client(listing=[make_integration_device()])
+        with patch("src.tools.devices.UniFiClient", return_value=client):
+            result = await get_device_details("site-1", mac, integration_settings)
+
+        assert result["id"] == INTEGRATION_UUID
+
+    @pytest.mark.asyncio
+    async def test_object_id_of_unknown_device_is_not_found(self, integration_settings):
+        client = details_client(
+            listing=[make_integration_device()],
+            legacy=[{"_id": DEVICE_ID_1, "mac": "24:5a:4c:18:8c:d5"}],
+        )
+        with patch("src.tools.devices.UniFiClient", return_value=client):
             with pytest.raises(ResourceNotFoundError):
-                await get_device_details("site-1", DEVICE_ID_3, mock_settings)
+                await get_device_details("site-1", DEVICE_ID_3, integration_settings)
 
     @pytest.mark.asyncio
-    async def test_get_device_details_invalid_site_id(self, mock_settings):
+    async def test_mac_of_unknown_device_is_not_found(self, integration_settings):
+        client = details_client(listing=[make_integration_device()])
+        with patch("src.tools.devices.UniFiClient", return_value=client):
+            with pytest.raises(ResourceNotFoundError):
+                await get_device_details("site-1", "aa:bb:cc:dd:ee:ff", integration_settings)
+
+    @pytest.mark.asyncio
+    async def test_invalid_site_id(self, mock_settings):
         with pytest.raises(ValidationError):
             await get_device_details("", DEVICE_ID_1, mock_settings)
 
     @pytest.mark.asyncio
-    async def test_get_device_details_invalid_device_id(self, mock_settings):
+    async def test_invalid_device_id(self, mock_settings):
         with pytest.raises(ValidationError):
             await get_device_details("site-1", "", mock_settings)
+
+    @pytest.mark.asyncio
+    async def test_garbage_identifier_is_rejected(self, mock_settings):
+        with pytest.raises(ValidationError):
+            await get_device_details("site-1", "not-an-id", mock_settings)
 
 
 class TestGetDeviceStatistics:
