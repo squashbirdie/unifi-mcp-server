@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] (squashbirdie fork)
 
+### Added
+
+- **Opt-in read-only mode, `UNIFI_READ_ONLY=true`** (ported from enuno `149541e`/#153): tools that can change
+  state are not registered, so they are absent from the tool list and a call fails with `Unknown tool`.
+  Tools are classified by signature (`confirm` or `dry_run` parameter) plus `MUTATING_TOOLS_WITHOUT_GATE`
+  (`run_speed_test`, and `download_backup`, which changes nothing on the controller but writes a file on the
+  host). Live: 118 of 197 tools remain; `update_wlan`, `create_firewall_policy`, `delete_acl_rule`,
+  `restart_device`, `adopt_device`, `download_backup`, `run_speed_test`, `trigger_backup` and `block_client`
+  are absent, reads work. `test_tool_registry.py` asserts that every write-verb tool in `src/tools` is
+  classified as mutating, so a new tool that forgets the markers fails the suite.
+  The upstream `UNIFI_PROFILE` warning was not ported (this fork has no profiles).
+
 ### Changed
 
 - **Dependency refresh** (`uv lock --upgrade`, floors in `pyproject.toml` raised to the tested versions).
@@ -24,6 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`site_id` reached request paths unvalidated** (ported from enuno `cf9bace`/#155): the endpoint translation
+  matches `^/ea/sites/([^/]+)/(.+)$`, so a `site_id` carrying `/`, `..`, `?` or `#` moved the capture boundary
+  and sent the request to a different controller path than the tool name implies (for example a POST to a
+  firewall-policies route from `create_radius_profile`). Every tool now calls `validate_site_id` first
+  (`site_manager` and `connector` stay exempt, as upstream). `test_site_id_validation.py` checks this
+  statically over all of `src/tools`. Live: `default/../../../v2/api/site/default/firewall-policies` and
+  `default?x=1` are rejected with `Invalid site ID format` before any request is made; `default` still works.
+  The merge dropped three hunks silently (imports in `qos.py` and `wans.py`, the `get_zone_statistics` stub);
+  `ruff` and that test caught them. `get_zone_policy_matrix` does not exist in this fork, so its hunk was dropped.
+- **`download_backup` could write any file the server could** (ported from enuno `64d5209`/#158): `output_path` was
+  used as given, and `backup_filename` was put into the request path unvalidated. `backup_filename` must now be
+  one plain path component and is URL-encoded; `download_backup` uses only the filename of `output_path` and
+  writes it inside `UNIFI_BACKUP_DOWNLOAD_DIR` (default: the current directory) with `O_NOFOLLOW` and mode
+  `0600`. **Breaking:** `output_path` is now a filename. Covered by unit tests only; the download itself was
+  not run against the controller.
 - **The topology had no device-to-device links, no uplinks and depth 0** (cherry-picked from enuno, in order:
   `d83cefa`/#105, `9557286`/#135, `83919bb`/#136): device uplinks, online state and hop depth are resolved,
   every host behind a switch port is reported, and `get_device_connections`/`get_port_mappings` resolve their
