@@ -1696,6 +1696,60 @@ async def test_update_radius_account_username_only(mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_update_radius_account_reads_back_when_put_is_not_echoed(mock_settings):
+    """The controller accepted the PUT but replied with nothing: re-read, do not crash on {}.
+
+    It also drops ``note`` and ``enabled`` (the record keeps only name/x_password/vlan/tunnel
+    attributes), so the reply must say so instead of reporting model defaults as stored values.
+    """
+    stored = {"_id": "acct-1", "name": "bob", "x_password": "secret", "site_id": "s1"}
+
+    with patch("src.tools.radius.UniFiClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.is_authenticated = True
+        mock_client.put = AsyncMock(return_value={"data": []})
+        mock_client.get = AsyncMock(return_value={"data": [stored]})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_class.return_value = mock_client
+
+        result = await update_radius_account(
+            site_id="default",
+            account_id="acct-1",
+            settings=mock_settings,
+            note="round trip",
+            confirm=True,
+        )
+
+    assert result["id"] == "acct-1"
+    assert result["password"] == "***REDACTED***"
+    assert result["warnings"] == ["the controller did not store: note"]
+
+
+@pytest.mark.asyncio
+async def test_update_radius_account_unknown_id_after_unechoed_put_is_not_found(mock_settings):
+    from src.utils.exceptions import ResourceNotFoundError
+
+    with patch("src.tools.radius.UniFiClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.is_authenticated = True
+        mock_client.put = AsyncMock(return_value={"data": []})
+        mock_client.get = AsyncMock(return_value={"data": []})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ResourceNotFoundError):
+            await update_radius_account(
+                site_id="default",
+                account_id="gone",
+                settings=mock_settings,
+                username="bob",
+                confirm=True,
+            )
+
+
+@pytest.mark.asyncio
 async def test_update_radius_account_vlan(mock_settings):
     """Test update radius account sets correct API field names for VLAN."""
     mock_response = {

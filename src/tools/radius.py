@@ -7,6 +7,7 @@ from ..config import Settings
 from ..models.radius import RADIUSAccount, RADIUSProfile
 from ..utils import (
     APIError,
+    ResourceNotFoundError,
     ValidationError,
     audit_action,
     get_logger,
@@ -16,6 +17,24 @@ from ..utils import (
 )
 
 logger = get_logger(__name__)
+
+
+def _unstored_fields(requested: dict[str, Any], stored: dict[str, Any]) -> list[str]:
+    """Names of requested account fields that the controller did not keep.
+
+    The legacy ``rest/account`` record holds only ``name``, ``x_password``, ``vlan`` and the tunnel
+    attributes on this controller: ``enabled`` and ``note`` are accepted and silently dropped, so a
+    reply built from model defaults would claim ``enabled: true`` / ``note: null`` as if stored.
+    The password is never compared.
+
+    Args:
+        requested: Fields the caller asked for, under their controller names
+        stored: The record as read back from the controller
+
+    Returns:
+        Sorted names of requested fields that are absent or different in the stored record
+    """
+    return sorted(k for k, v in requested.items() if k != "x_password" and stored.get(k) != v)
 
 
 # =============================================================================
@@ -477,7 +496,14 @@ async def create_radius_account(
         if "x_password" in data:
             data["x_password"] = "***REDACTED***"
 
-        return RADIUSAccount(**data).model_dump()
+        result = RADIUSAccount(**data).model_dump()
+        requested = dict(payload)
+        if not enabled:
+            requested["enabled"] = False  # accepted as a parameter but never sent
+        dropped = _unstored_fields(requested, data)
+        if dropped:
+            result["warnings"] = [f"the controller did not store: {', '.join(dropped)}"]
+        return result
 
 
 async def get_radius_account(
@@ -598,6 +624,17 @@ async def update_radius_account(
         if isinstance(data, list):
             data = data[0] if data else {}
 
+        # The controller may accept the PUT without echoing the record (empty reply): read it back
+        # rather than failing to parse an empty dict after the write already landed.
+        if not (isinstance(data, dict) and data.get("_id")):
+            listing = await client.get(f"/ea/sites/{site_id}/rest/account")
+            records = listing if isinstance(listing, list) else listing.get("data", [])
+            data = next(
+                (a for a in records if isinstance(a, dict) and a.get("_id") == account_id), {}
+            )
+            if not data:
+                raise ResourceNotFoundError("radius_account", account_id)
+
         await audit_action(
             settings,
             action_type="update_radius_account",
@@ -607,10 +644,14 @@ async def update_radius_account(
             details={k: ("***REDACTED***" if k == "x_password" else v) for k, v in payload.items()},
         )
 
+        dropped = _unstored_fields(payload, data)
         if "x_password" in data:
             data["x_password"] = "***REDACTED***"
 
-        return RADIUSAccount(**data).model_dump()
+        result = RADIUSAccount(**data).model_dump()
+        if dropped:
+            result["warnings"] = [f"the controller did not store: {', '.join(dropped)}"]
+        return result
 
 
 async def delete_radius_account(
