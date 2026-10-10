@@ -424,6 +424,33 @@ def _resolve_topology_node(topology: dict[str, Any], device_id: str) -> str:
     raise ResourceNotFoundError("device", device_id)
 
 
+async def _resolve_device_identifier(
+    topology: dict[str, Any], site_id: str, device_id: str, settings: Settings
+) -> str:
+    """Like ``_resolve_topology_node``, plus the legacy 24-hex ObjectId.
+
+    ``search_devices`` and ``list_devices_by_type`` return the legacy ObjectId as ``id``, and the
+    topology (Integration API) has no such field. The ObjectId is mapped to a MAC through the legacy
+    device list and matched by MAC. Anything still unknown raises, as in ``_resolve_topology_node``.
+    """
+    try:
+        return _resolve_topology_node(topology, device_id)
+    except ResourceNotFoundError:
+        wanted = device_id.strip().lower()
+        if len(wanted) != 24 or any(c not in "0123456789abcdef" for c in wanted):
+            raise
+
+    async with UniFiClient(settings) as client:
+        if not client.is_authenticated:
+            await client.authenticate()
+        response = await client.get(f"/ea/sites/{site_id}/devices")
+    legacy = response if isinstance(response, list) else response.get("data", [])
+    for item in legacy:
+        if isinstance(item, dict) and item.get("_id") == wanted and item.get("mac"):
+            return _resolve_topology_node(topology, str(item["mac"]))
+    raise ResourceNotFoundError("device", device_id)
+
+
 async def get_device_connections(
     site_id: str,
     device_id: str | None,
@@ -457,7 +484,7 @@ async def get_device_connections(
     if device_id:
         # Resolve first: the caller may hold a MAC or a legacy id rather than
         # the topology's own node_id (see _resolve_topology_node).
-        node_id = _resolve_topology_node(topology, device_id)
+        node_id = await _resolve_device_identifier(topology, site_id, device_id, settings)
         connections = [
             conn
             for conn in connections
@@ -505,7 +532,7 @@ async def get_port_mappings(
     # Resolve first: a MAC or legacy controller id would otherwise match no
     # node and yield an empty map, reading as "no connections" rather than
     # "unknown device" (see _resolve_topology_node).
-    node_id = _resolve_topology_node(topology, device_id)
+    node_id = await _resolve_device_identifier(topology, site_id, device_id, settings)
 
     # Build port mapping
     port_map: dict[Any, list[dict[str, Any]]] = {}

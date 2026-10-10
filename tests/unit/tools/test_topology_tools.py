@@ -1047,3 +1047,59 @@ async def test_legacy_rows_skip_non_dict_entries(mock_settings):
     assert list(devices) == ["00:00:5e:00:53:41"]
     assert devices["00:00:5e:00:53:41"]["port_idx"] == 3
     assert list(clients) == ["00:00:5e:00:53:07"]
+
+
+SWITCH_A_OBJECT_ID = "507f191e810c19729de860ea"  # pragma: allowlist secret
+
+
+def _legacy_client(devices):
+    client = AsyncMock()
+    client.is_authenticated = True
+    client.get = AsyncMock(return_value={"data": devices})
+    client.__aenter__.return_value = client
+    return client
+
+
+@pytest.mark.asyncio
+async def test_legacy_object_id_resolves_through_the_mac(mock_settings):
+    """search_devices returns the legacy ObjectId as ``id``; the topology has none, so the id is
+    mapped to a MAC through the legacy device list instead of reading as an unknown device."""
+    from src.tools.topology import get_port_mappings
+
+    legacy = _legacy_client([{"_id": SWITCH_A_OBJECT_ID, "mac": "00:00:5E:00:53:10"}])
+    with (
+        patch("src.tools.topology.get_network_topology", return_value=TOPO_FIXTURE),
+        patch("src.tools.topology.UniFiClient", return_value=legacy),
+    ):
+        result = await get_port_mappings("default", SWITCH_A_OBJECT_ID, mock_settings)
+
+    assert result["device_id"] == "uuid-sw1"
+    assert result["ports"][8][0]["connected_to"] == "uuid-sw2"
+
+
+@pytest.mark.asyncio
+async def test_unknown_legacy_object_id_still_raises(mock_settings):
+    from src.tools.topology import get_device_connections
+
+    legacy = _legacy_client([{"_id": "507f191e810c19729de86000", "mac": "00:00:5E:00:53:99"}])
+    with (
+        patch("src.tools.topology.get_network_topology", return_value=TOPO_FIXTURE),
+        patch("src.tools.topology.UniFiClient", return_value=legacy),
+    ):
+        with pytest.raises(ResourceNotFoundError, match="device"):
+            await get_device_connections("default", SWITCH_A_OBJECT_ID, mock_settings)
+
+
+@pytest.mark.asyncio
+async def test_non_object_id_junk_never_queries_the_legacy_list(mock_settings):
+    from src.tools.topology import get_port_mappings
+
+    legacy = _legacy_client([])
+    with (
+        patch("src.tools.topology.get_network_topology", return_value=TOPO_FIXTURE),
+        patch("src.tools.topology.UniFiClient", return_value=legacy),
+    ):
+        with pytest.raises(ResourceNotFoundError, match="device"):
+            await get_port_mappings("default", "no-such-switch", mock_settings)
+
+    legacy.get.assert_not_called()
