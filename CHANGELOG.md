@@ -43,6 +43,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dict[str, Any]` annotation, targeted `type: ignore`s); runtime behaviour is unchanged. The `settings: Settings = None`
   signature of `update_firewall_policy`/`delete_firewall_policy` is kept as is because `register_module_tools` injects it.
 
+### Fixed (batch 6: ported from enuno, after a gap analysis of the 151 upstream commits since `14cf53e`)
+
+Checked against this fork's code before porting; the unit tests pass (1596) but **none of these paths was run
+against a controller**: no controller credentials were available in the session that ported them.
+
+- **`audit.log` recorded secrets in the clear** (enuno `7e2e6c5`/#154): `AuditLogger.log_operation` persisted
+  tool parameters verbatim, so RADIUS shared secrets, WLAN passphrases and IPsec PSKs reached the file, created
+  with the umask default (0644). Credentials are now redacted centrally (`sanitize_credentials`; identifiers
+  such as `site_id`, `name` and `mac` are kept), the file is created `0600`, `UNIFI_AUDIT_LOG_PATH` is honoured
+  (the old code read a settings field that did not exist) and `UNIFI_AUDIT_LOG_ENABLED` now actually switches
+  auditing off. Smoke: `auth_secret` and `x_passphrase` are written as `***`, mode `0600`.
+- **`dry_run="false"` silently returned a preview** (fork-wide; upstream only fixed `network_config.py`, `fb79ef4`):
+  tools declare `dry_run: bool | str`, and about 19 tool files test `if dry_run:` on the raw value, so a client
+  that serializes booleans as strings never wrote anything. The registry wrapper now converts string
+  `dry_run`/`confirm` to booleans before the tool runs; an unrecognized `dry_run` string is refused rather than
+  read as `False`. Reproduced on `main` through the MCP client (`create_network`, `dry_run="false"` returned
+  `{"dry_run": true}`); after the change it attempts the write.
+- **Retries could burn about 127 s per request** (enuno `2377218`/#124): with a 30 s timeout and 3 retries, one
+  request plus backoff outlasts most MCP client tool-call timeouts, and a tool that authenticates first doubles
+  it. Retries now also stop at a wall-clock budget, `UNIFI_RETRY_TOTAL_TIMEOUT` (default 60 s), and fail with a
+  message naming it. One change beyond upstream: `NetworkError` is re-raised from `_request`, because a 429 whose
+  `Retry-After` exceeds the budget is raised inside the `try` block and was being wrapped as
+  `APIError: Unexpected error` (regression test added). `.env.example` now names `UNIFI_REQUEST_TIMEOUT`
+  (`UNIFI_TIMEOUT` was never read).
+- **`adopt_device`, `execute_port_action`, `authorize_guest` called routes that do not exist** (enuno
+  `9cc005d`, hardware-verified upstream on 2026-09-27 against Network 10.x: the legacy routes answer 404, the
+  spec routes answer with validation errors). **Breaking:** `adopt_device(site_id, mac, ignore_device_limit)` takes
+  a MAC and POSTs `/sites/{id}/devices`; `authorize_guest` takes `client_id` and posts the spec's
+  `AUTHORIZE_GUEST_ACCESS` body to `.../clients/{id}/actions`, plus `data_usage_limit_mbytes`;
+  `execute_port_action` accepts only `power_cycle` (the one action in the spec) on `.../interfaces/ports/{idx}/actions`;
+  `limit_bandwidth` now raises `NotImplementedError` because the Integration API has no equivalent (use
+  `authorize_guest` with rate limits). Upstream's evidence is on its hardware, not this controller (10.5.67).
+- **`set_ap_radio_channel` reported success for changes the controller dropped** (enuno `a711327`/#142): it PUT
+  the whole `stat/device` operational record back, which the controller answers with 200 while ignoring the
+  change. It now fetches the config record, PUTs only `radio_table`, compares the echo field by field and
+  returns `success: false` with `warnings` (and audits `unconfirmed`) when the stored value differs.
+- **`create_wlan` rejected WPA3 and 6 GHz SSIDs** (enuno `6f63573`/#79): `wpa_mode="wpa3"` went to the controller
+  literally. It is now sent as `wpa2` plus `wpa3_support=true`, 6 GHz implies WPA3 and PMF `required`, and
+  `wpa3_support`, `wpa3_transition` and `pmf_mode` are parameters. `update_wlan` still sends `wpa_mode` as given.
+- **`update_dhcp_reservation` never activated a fixed IP, and `create_dhcp_reservation` failed for known clients**
+  (enuno `cf712f0`/#95, `6257236`/#132): the controller ignores `fixed_ip` unless `use_fixedip` is set, and a
+  POST for a MAC it has already seen answers `api.err.MacUsed`, which is the usual case. Update now sets
+  `use_fixedip`; create looks the MAC up and merges into the existing record.
+- **A firewall policy with a `WEB` matching target made every policy unreadable** (enuno `3ce10db`/#107): the
+  enum lacked `WEB`.
+- Not taken from upstream, on purpose: fleet mode (phases 0-7), Protect v7, Mobility/InnerSpace/Carrier Fabric,
+  A2A, Cloud Connector, audit encryption, global dry-run and `/metrics`, and the HTTP-transport fixes
+  (#157, #169, #177), none of which apply to a stdio, local-controller deployment.
+
 ### Fixed (fork-only, found by sweeping every tool against the controller)
 
 - **Write tools, found by live reversible round trips against the UDM** (create, read back, change, read back,
