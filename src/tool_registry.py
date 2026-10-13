@@ -20,7 +20,9 @@ from typing import Any
 from fastmcp import FastMCP
 
 from .config import Settings
+from .utils.exceptions import ValidationError
 from .utils.logger import get_logger
+from .utils.validators import coerce_bool
 
 #: Parameters that mark a tool as state-changing.
 #:
@@ -69,6 +71,42 @@ def is_mutating_tool(fn: Any) -> bool:
     return any(marker in params for marker in _MUTATION_MARKERS)
 
 
+_TRUE_STRINGS = frozenset({"true", "1", "yes"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", ""})
+
+
+def _coerce_gate_flags(kwargs: dict[str, Any]) -> None:
+    """Turn string ``dry_run``/``confirm`` values into real booleans, in place.
+
+    Tools declare these as ``bool | str`` because some MCP clients serialize
+    booleans as strings. A tool body that tests ``if dry_run:`` would treat the
+    string ``"false"`` as true and silently preview instead of writing, so the
+    flags are normalized once here instead of at every call site.
+
+    ``confirm`` keeps :func:`coerce_bool` semantics (anything but true/1/yes is
+    refused downstream). ``dry_run`` is stricter: an unrecognized string raises
+    instead of being read as ``False``, because ``False`` would make the write run.
+
+    Args:
+        kwargs: Keyword arguments about to be passed to the tool; modified in place.
+
+    Raises:
+        ValidationError: If ``dry_run`` is a string that is not a recognizable boolean.
+    """
+    confirm = kwargs.get("confirm")
+    if isinstance(confirm, str):
+        kwargs["confirm"] = coerce_bool(confirm)
+    dry_run = kwargs.get("dry_run")
+    if isinstance(dry_run, str):
+        lowered = dry_run.strip().lower()
+        if lowered in _TRUE_STRINGS:
+            kwargs["dry_run"] = True
+        elif lowered in _FALSE_STRINGS:
+            kwargs["dry_run"] = False
+        else:
+            raise ValidationError(f"dry_run must be true or false, got {dry_run!r}")
+
+
 def _make_tool_wrapper(fn: Any, settings: Settings) -> Any:
     """Return an async wrapper for *fn* with ``settings`` bound.
 
@@ -97,6 +135,7 @@ def _make_tool_wrapper(fn: Any, settings: Settings) -> Any:
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             kwargs["settings"] = settings
+            _coerce_gate_flags(kwargs)
             return await fn(*args, **kwargs)
 
     else:
@@ -104,6 +143,7 @@ def _make_tool_wrapper(fn: Any, settings: Settings) -> Any:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             kwargs["settings"] = settings
+            _coerce_gate_flags(kwargs)
             return fn(*args, **kwargs)
 
     wrapper.__signature__ = public_sig  # type: ignore[attr-defined]

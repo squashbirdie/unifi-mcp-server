@@ -156,3 +156,64 @@ def _real_tool_functions():
 def test_every_write_verb_tool_is_hidden_in_read_only_mode(module_name, name, fn):
     """A new tool named like a write must carry confirm/dry_run or be listed, or this fails."""
     assert is_mutating_tool(fn), f"{module_name}.{name} would be exposed by UNIFI_READ_ONLY"
+
+
+class TestGateFlagCoercion:
+    """``dry_run``/``confirm`` arrive as strings from some MCP clients.
+
+    A tool body that tests ``if dry_run:`` treats ``"false"`` as true, so the registry
+    wrapper must hand the tool real booleans.
+    """
+
+    @staticmethod
+    def _wrapped():
+        from src.tool_registry import _make_tool_wrapper
+
+        seen: dict = {}
+
+        async def tool(
+            site_id: str, settings, confirm: bool | str = False, dry_run: bool | str = False
+        ):
+            seen.update(confirm=confirm, dry_run=dry_run)
+            return seen
+
+        return _make_tool_wrapper(tool, MagicMock()), seen
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("false", False),
+            ("False", False),
+            ("0", False),
+            ("", False),
+            ("true", True),
+            ("YES", True),
+        ],
+    )
+    async def test_dry_run_string_becomes_bool(self, raw, expected):
+        wrapper, seen = self._wrapped()
+        await wrapper(site_id="default", confirm="true", dry_run=raw)
+        assert seen["dry_run"] is expected
+        assert seen["confirm"] is True
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_dry_run_string_is_refused_not_read_as_false(self):
+        from src.utils.exceptions import ValidationError
+
+        wrapper, seen = self._wrapped()
+        with pytest.raises(ValidationError, match="dry_run"):
+            await wrapper(site_id="default", confirm=True, dry_run="maybe")
+        assert seen == {}
+
+    @pytest.mark.asyncio
+    async def test_confirm_string_false_stays_false(self):
+        wrapper, seen = self._wrapped()
+        await wrapper(site_id="default", confirm="false")
+        assert seen["confirm"] is False
+
+    @pytest.mark.asyncio
+    async def test_native_booleans_pass_through(self):
+        wrapper, seen = self._wrapped()
+        await wrapper(site_id="default", confirm=True, dry_run=False)
+        assert (seen["confirm"], seen["dry_run"]) == (True, False)
