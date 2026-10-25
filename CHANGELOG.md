@@ -94,6 +94,23 @@ against a controller**: no controller credentials were available in the session 
 
 ### Fixed (fork-only, found by sweeping every tool against the controller)
 
+- **`create_network` / `update_network`, found while adding a Kids VLAN and fixing a Guest network on the UDM
+  (2026-10-24/25):**
+  - Neither set `dhcpd_dns_enabled` when DNS servers were given. UniFi only hands out `dhcpd_dns_N` when that flag
+    is true; otherwise DHCP advertises the gateway as resolver. A VLAN created with `dhcp_dns_1` therefore gave
+    its clients the gateway as DNS (blocked by a gateway firewall rule: the client resolved nothing). Setting any
+    DNS server now sets the flag.
+  - `update_network` raised `IndexError: list index out of range` when the controller accepted the PUT without
+    echoing the record (`data: []`), after the write had already landed; `create_network` had the same unguarded
+    `[0]`. Both now use `first_response_item` and, on an empty reply, read the stored record back. Because the
+    client drops UniFi's `meta`, an empty reply cannot prove success, so `update_network` then requires every
+    requested field on the stored record and raises `APIError` naming any that did not take.
+  - `update_network`'s dry run echoed only `name`/`vlan_id`/`subnet`/`dhcp_enabled`, so a DNS or DHCP-range change
+    looked as if it would be dropped. It now returns `changes`, the exact fields the real call sends.
+  - Live: on the Guest network `dhcp_dns_1` went from `10.0.30.5` to `10.0.1.220`; the fresh read-back showed
+    that as the only changed field (that PUT reply did echo the record, so the empty-reply path is covered by the
+    unit tests, not by this run).
+
 - **Write tools, found by live reversible round trips against the UDM** (create, read back, change, read back,
   delete; 9 of 12 passed first time: firewall group, disabled port forward, DHCP reservation, voucher, RADIUS
   profile, disabled firewall policy, port profile, locate LED, hotspot package refused by the controller as

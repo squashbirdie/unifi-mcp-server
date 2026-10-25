@@ -1,18 +1,41 @@
 """Network configuration MCP tools."""
 
-from typing import Any, cast
+from typing import Any
 
 from ..api import UniFiClient
 from ..config import Settings
 from ..utils import (
+    APIError,
     ResourceNotFoundError,
     ValidationError,
+    first_response_item,
     get_logger,
     log_audit,
     sanitize_log_message,
     validate_confirmation,
     validate_site_id,
 )
+
+
+async def _find_network(client: UniFiClient, site_id: str, **match: Any) -> dict[str, Any] | None:
+    """Fetch the site's networks and return the first one whose fields equal ``match``."""
+    response = await client.get(f"/ea/sites/{site_id}/rest/networkconf")
+    networks: list[dict[str, Any]] = (
+        response if isinstance(response, list) else response.get("data", [])
+    )
+    for network in networks:
+        if all(network.get(key) == value for key, value in match.items()):
+            return network
+    return None
+
+
+def _dns_enabled_if_set(*servers: str | None) -> dict[str, Any]:
+    """UniFi hands out ``dhcpd_dns_N`` only when ``dhcpd_dns_enabled`` is true.
+
+    Without the flag DHCP advertises the gateway as the resolver and the listed servers are
+    silently ignored, so setting any server must also set the flag.
+    """
+    return {"dhcpd_dns_enabled": True} if any(servers) else {}
 
 
 async def create_network(
@@ -100,6 +123,7 @@ async def create_network(
             network_data["dhcpd_dns_4"] = dhcp_dns_4
         if domain_name:
             network_data["domain_name"] = domain_name
+        network_data.update(_dns_enabled_if_set(dhcp_dns_1, dhcp_dns_2, dhcp_dns_3, dhcp_dns_4))
 
     # Log parameters for audit
     parameters = {
@@ -133,11 +157,12 @@ async def create_network(
             response = await client.post(
                 f"/ea/sites/{site_id}/rest/networkconf", json_data=network_data
             )
-            if isinstance(response, list):
-                created_network = response[0] if response else {}
-            else:
-                _raw = response.get("data", response)
-                created_network = _raw[0] if isinstance(_raw, list) else _raw
+            created_network: dict[str, Any] | None = first_response_item(response)
+            if not created_network:
+                # UniFi accepted the write without echoing the record: read it back.
+                created_network = await _find_network(client, site_id, name=name, vlan=vlan_id)
+            if created_network is None:
+                raise ResourceNotFoundError("network", name)
 
             logger.info(sanitize_log_message(f"Created network '{name}' in site '{site_id}'"))
             log_audit(
@@ -147,7 +172,7 @@ async def create_network(
                 site_id=site_id,
             )
 
-            return cast("dict[str, Any]", created_network)
+            return created_network
 
     except Exception as e:
         logger.error(sanitize_log_message(f"Failed to create network '{name}': {e}"))
@@ -218,6 +243,27 @@ async def update_network(
     if subnet is not None and "/" not in subnet:
         raise ValidationError(f"Invalid subnet '{subnet}'. Must be in CIDR notation")
 
+    changes: dict[str, Any] = {}
+    if name is not None:
+        changes["name"] = name
+    if vlan_id is not None:
+        changes["vlan_enabled"] = True
+        changes["vlan"] = vlan_id
+    if subnet is not None:
+        changes["ip_subnet"] = subnet
+    if dhcp_enabled is not None:
+        changes["dhcpd_enabled"] = dhcp_enabled
+    if dhcp_start is not None:
+        changes["dhcpd_start"] = dhcp_start
+    if dhcp_stop is not None:
+        changes["dhcpd_stop"] = dhcp_stop
+    for index, server in enumerate((dhcp_dns_1, dhcp_dns_2, dhcp_dns_3, dhcp_dns_4), start=1):
+        if server is not None:
+            changes[f"dhcpd_dns_{index}"] = server
+    if domain_name is not None:
+        changes["domain_name"] = domain_name
+    changes.update(_dns_enabled_if_set(dhcp_dns_1, dhcp_dns_2, dhcp_dns_3, dhcp_dns_4))
+
     parameters = {
         "site_id": site_id,
         "network_id": network_id,
@@ -225,6 +271,7 @@ async def update_network(
         "vlan_id": vlan_id,
         "subnet": subnet,
         "dhcp_enabled": dhcp_enabled,
+        "changes": changes,
     }
 
     if dry_run:
@@ -240,62 +287,40 @@ async def update_network(
             site_id=site_id,
             dry_run=True,
         )
+        # The preview carries the exact field changes the real call sends (it used to echo only
+        # name/vlan/subnet/dhcp_enabled, which made a DNS change look as if it would be dropped).
         return {"dry_run": True, "would_update": parameters}
 
     try:
         async with UniFiClient(settings) as client:
             await client.authenticate()
 
-            # Get existing network
-            response = await client.get(f"/ea/sites/{site_id}/rest/networkconf")
-            networks_data: list[dict[str, Any]] = (
-                response if isinstance(response, list) else response.get("data", [])
-            )
-
-            existing_network = None
-            for network in networks_data:
-                if network.get("_id") == network_id:
-                    existing_network = network
-                    break
-
+            existing_network = await _find_network(client, site_id, _id=network_id)
             if not existing_network:
                 raise ResourceNotFoundError("network", network_id)
 
-            # Build update data
             update_data = existing_network.copy()
-
-            if name is not None:
-                update_data["name"] = name
-            if vlan_id is not None:
-                update_data["vlan_enabled"] = True
-                update_data["vlan"] = vlan_id
-            if subnet is not None:
-                update_data["ip_subnet"] = subnet
-            if dhcp_enabled is not None:
-                update_data["dhcpd_enabled"] = dhcp_enabled
-            if dhcp_start is not None:
-                update_data["dhcpd_start"] = dhcp_start
-            if dhcp_stop is not None:
-                update_data["dhcpd_stop"] = dhcp_stop
-            if dhcp_dns_1 is not None:
-                update_data["dhcpd_dns_1"] = dhcp_dns_1
-            if dhcp_dns_2 is not None:
-                update_data["dhcpd_dns_2"] = dhcp_dns_2
-            if dhcp_dns_3 is not None:
-                update_data["dhcpd_dns_3"] = dhcp_dns_3
-            if dhcp_dns_4 is not None:
-                update_data["dhcpd_dns_4"] = dhcp_dns_4
-            if domain_name is not None:
-                update_data["domain_name"] = domain_name
+            update_data.update(changes)
 
             response = await client.put(
                 f"/ea/sites/{site_id}/rest/networkconf/{network_id}", json_data=update_data
             )
-            if isinstance(response, list):
-                updated_network = response[0] if response else {}
-            else:
-                _raw = response.get("data", response)
-                updated_network = _raw[0] if isinstance(_raw, list) else _raw
+            updated_network: dict[str, Any] | None = first_response_item(response)
+            if not updated_network:
+                # No record in the reply. The client drops UniFi's ``meta`` block, so an empty
+                # ``data`` cannot tell a success from a rejected write: read the stored record
+                # back and require every requested field to be there before reporting success.
+                updated_network = await _find_network(client, site_id, _id=network_id)
+                if updated_network is None:
+                    raise ResourceNotFoundError("network", network_id)
+                not_applied = sorted(
+                    key for key, value in changes.items() if updated_network.get(key) != value
+                )
+                if not_applied:
+                    raise APIError(
+                        f"update_network: the controller returned no record and the stored "
+                        f"network does not show the requested change for: {', '.join(not_applied)}"
+                    )
 
             logger.info(sanitize_log_message(f"Updated network '{network_id}' in site '{site_id}'"))
             log_audit(
@@ -305,7 +330,7 @@ async def update_network(
                 site_id=site_id,
             )
 
-            return cast("dict[str, Any]", updated_network)
+            return updated_network
 
     except Exception as e:
         logger.error(sanitize_log_message(f"Failed to update network '{network_id}': {e}"))

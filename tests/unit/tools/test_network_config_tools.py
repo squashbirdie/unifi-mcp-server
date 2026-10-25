@@ -6,7 +6,7 @@ import pytest
 
 import src.tools.network_config as nc_module
 from src.tools.network_config import create_network, delete_network, update_network
-from src.utils.exceptions import ResourceNotFoundError, ValidationError
+from src.utils.exceptions import APIError, ResourceNotFoundError, ValidationError
 
 
 @pytest.fixture
@@ -993,3 +993,147 @@ async def test_update_network_dns_settings(mock_settings):
 
     assert result["dhcpd_dns_1"] == "1.1.1.1"
     assert result["dhcpd_dns_2"] == "1.0.0.1"
+
+
+# =============================================================================
+# Regressions found against a real UDM (2026-10-24/25)
+# =============================================================================
+
+
+def _client_with(get_responses, put_response=None, post_response=None):
+    mock_client = MagicMock()
+    mock_client.authenticate = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=list(get_responses))
+    mock_client.put = AsyncMock(return_value=put_response)
+    mock_client.post = AsyncMock(return_value=post_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_update_network_empty_put_response_returns_stored_record(mock_settings):
+    """A successful PUT can come back with ``data: []``; that used to raise IndexError
+    ('list index out of range') after the change had already been applied."""
+    before = {"_id": "net1", "name": "Guest", "dhcpd_enabled": True, "dhcpd_dns_1": "10.0.30.5"}
+    after = {**before, "dhcpd_dns_1": "10.0.1.220", "dhcpd_dns_enabled": True}
+    mock_client = _client_with(
+        [{"data": [before]}, {"data": [after]}], put_response={"meta": {"rc": "ok"}, "data": []}
+    )
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        result = await update_network(
+            site_id="default",
+            network_id="net1",
+            settings=mock_settings,
+            dhcp_dns_1="10.0.1.220",
+            confirm=True,
+        )
+
+    assert result == after
+
+
+@pytest.mark.asyncio
+async def test_update_network_dns_servers_enable_dhcp_dns(mock_settings):
+    """Setting a DNS server must also set dhcpd_dns_enabled, or UniFi ignores the server."""
+    before = {"_id": "net1", "name": "Kids", "dhcpd_enabled": True}
+    mock_client = _client_with([{"data": [before]}], put_response={"data": [before]})
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        await update_network(
+            site_id="default",
+            network_id="net1",
+            settings=mock_settings,
+            dhcp_dns_1="10.0.1.220",
+            confirm=True,
+        )
+
+    sent = mock_client.put.call_args.kwargs["json_data"]
+    assert sent["dhcpd_dns_1"] == "10.0.1.220"
+    assert sent["dhcpd_dns_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_network_without_dns_leaves_dhcp_dns_flag_alone(mock_settings):
+    before = {"_id": "net1", "name": "Old", "dhcpd_dns_enabled": False}
+    mock_client = _client_with([{"data": [before]}], put_response={"data": [before]})
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        await update_network(
+            site_id="default", network_id="net1", settings=mock_settings, name="New", confirm=True
+        )
+
+    assert mock_client.put.call_args.kwargs["json_data"]["dhcpd_dns_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_network_dns_servers_enable_dhcp_dns(mock_settings):
+    """create_network left dhcpd_dns_enabled unset, so a new VLAN got the gateway as resolver."""
+    mock_client = _client_with([], post_response={"data": [{"_id": "n", "name": "Kids"}]})
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        await create_network(
+            site_id="default",
+            name="Kids",
+            vlan_id=40,
+            subnet="10.0.40.1/24",
+            settings=mock_settings,
+            dhcp_dns_1="10.0.1.220",
+            confirm=True,
+        )
+
+    assert mock_client.post.call_args.kwargs["json_data"]["dhcpd_dns_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_network_empty_post_response_returns_stored_record(mock_settings):
+    stored = {"_id": "n", "name": "Kids", "vlan": 40}
+    mock_client = _client_with([{"data": [stored]}], post_response={"data": []})
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        result = await create_network(
+            site_id="default",
+            name="Kids",
+            vlan_id=40,
+            subnet="10.0.40.1/24",
+            settings=mock_settings,
+            confirm=True,
+        )
+
+    assert result == stored
+
+
+@pytest.mark.asyncio
+async def test_update_network_dry_run_shows_the_dns_change(mock_settings):
+    """The preview used to echo only name/vlan/subnet/dhcp_enabled, so a DNS change looked dropped."""
+    result = await update_network(
+        site_id="default",
+        network_id="net1",
+        settings=mock_settings,
+        dhcp_dns_1="10.0.1.220",
+        confirm=True,
+        dry_run=True,
+    )
+
+    assert result["would_update"]["changes"] == {
+        "dhcpd_dns_1": "10.0.1.220",
+        "dhcpd_dns_enabled": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_network_empty_reply_and_unchanged_record_is_an_error(mock_settings):
+    """The client drops UniFi's ``meta``, so an empty reply may hide a rejected write: the
+    fallback must not report success when the stored record does not show the change."""
+    before = {"_id": "net1", "name": "Guest", "dhcpd_dns_1": "10.0.30.5", "dhcpd_dns_enabled": True}
+    mock_client = _client_with([{"data": [before]}, {"data": [before]}], put_response={"data": []})
+
+    with patch.object(nc_module, "UniFiClient", return_value=mock_client):
+        with pytest.raises(APIError, match="dhcpd_dns_1"):
+            await update_network(
+                site_id="default",
+                network_id="net1",
+                settings=mock_settings,
+                dhcp_dns_1="10.0.1.220",
+                confirm=True,
+            )
